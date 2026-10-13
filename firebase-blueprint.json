@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (warga, admin, kades) and demographic details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID (auth UID)" },
+        "email": { "type": "string", "description": "User email address" },
+        "fullName": { "type": "string", "description": "Full name of the user" },
+        "role": { "type": "string", "enum": ["warga", "admin", "kades"], "description": "User role in the village system" },
+        "nik": { "type": "string", "description": "16-digit Nomor Induk Kependudukan", "maxLength": 16 },
+        "noKk": { "type": "string", "description": "16-digit Nomor Kartu Keluarga", "maxLength": 16 },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "address": { "type": "string", "description": "Street address" },
+        "rt": { "type": "string", "description": "Rukun Tetangga (e.g. 01, 02)" },
+        "rw": { "type": "string", "description": "Rukun Warga (e.g. 01, 05)" },
+        "dusun": { "type": "string", "description": "Dusun name in Bojongloa" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["id", "email", "fullName", "role"]
+    },
+    "AdminDoc": {
+      "title": "AdminDoc",
+      "description": "Admin authorization entry for RBAC",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Admin Auth UID" },
+        "email": { "type": "string", "description": "Admin email" },
+        "role": { "type": "string", "enum": ["admin", "kades"], "description": "Administrative authority level" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Created timestamp" }
+      },
+      "required": ["userId", "email", "role"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Application for village civil archives (kelahiran, kematian, pindah_masuk, pindah_keluar)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique submission ID" },
+        "userId": { "type": "string", "description": "UID of the applicant warga" },
+        "userEmail": { "type": "string", "description": "Email of the applicant" },
+        "userName": { "type": "string", "description": "Name of applicant" },
+        "userNik": { "type": "string", "description": "NIK of applicant" },
+        "userPhone": { "type": "string", "description": "Phone number" },
+        "type": { "type": "string", "enum": ["kelahiran", "kematian", "pindah_masuk", "pindah_keluar"], "description": "Type of archive application" },
+        "status": { "type": "string", "enum": ["menunggu", "diproses", "disetujui", "ditolak"], "description": "Application approval status" },
+        "title": { "type": "string", "description": "Short title or subject of request" },
+        "details": { "type": "string", "description": "JSON stringified details of the event or form fields" },
+        "attachments": { "type": "string", "description": "JSON stringified list of attached files or URLs" },
+        "rejectionNote": { "type": "string", "description": "Mandatory explanation if application is rejected" },
+        "suratNumber": { "type": "string", "description": "Official letter archive number assigned upon approval" },
+        "approvedBy": { "type": "string", "description": "Admin name or UID who acted on the submission" },
+        "approvedAt": { "type": "string", "description": "Approval/rejection timestamp" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Submission creation date" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Submission update date" }
+      },
+      "required": ["id", "userId", "userEmail", "userName", "type", "status", "createdAt"]
+    },
+    "Resident": {
+      "title": "Resident",
+      "description": "Civil population record of Bojongloa village",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique resident record ID" },
+        "nik": { "type": "string", "description": "16-digit NIK", "maxLength": 16 },
+        "noKk": { "type": "string", "description": "16-digit No KK", "maxLength": 16 },
+        "fullName": { "type": "string", "description": "Full legal name" },
+        "gender": { "type": "string", "enum": ["L", "P"], "description": "Gender: Laki-laki / Perempuan" },
+        "birthPlace": { "type": "string", "description": "Place of birth" },
+        "birthDate": { "type": "string", "description": "Date of birth (YYYY-MM-DD)" },
+        "religion": { "type": "string", "description": "Religion" },
+        "maritalStatus": { "type": "string", "enum": ["Belum Kawin", "Kawin", "Cerai Hidup", "Cerai Mati"], "description": "Status perkawinan" },
+        "occupation": { "type": "string", "description": "Job/Profession" },
+        "rt": { "type": "string", "description": "RT" },
+        "rw": { "type": "string", "description": "RW" },
+        "dusun": { "type": "string", "description": "Dusun" },
+        "address": { "type": "string", "description": "Full address" },
+        "status": { "type": "string", "enum": ["aktif", "meninggal", "pindah_keluar", "warga_baru"], "description": "Resident status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Record creation date" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Record update date" }
+      },
+      "required": ["id", "nik", "noKk", "fullName", "gender", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profiles with role and demographic info"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminDoc",
+      "description": "Stores authorized administrators and kepala desa"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Stores civil registry certificate applications"
+    },
+    "/residents/{residentId}": {
+      "schema": "Resident",
+      "description": "Stores Bojongloa population master records"
+    }
+  }
+}

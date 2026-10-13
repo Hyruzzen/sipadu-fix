@@ -1,0 +1,15 @@
+# Robots.txt untuk Portal Resmi & Layanan Kependudukan Desa Bojongloa
+# https://bojongloa.desa.id
+
+User-agent: *
+Allow: /
+Allow: /sitemap.xml
+Allow: /logo-kabupaten-bandung.svg
+
+# Direktori yang tidak perlu diindeks oleh crawler publik
+Disallow: /api/
+Disallow: /admin/
+
+# Peta Situs Resmi (XML Sitemap)
+Sitemap: https://bojongloa.desa.id/sitemap.xml
+Sitemap: https://arsipdesabojongloa.id/sitemap.xml
