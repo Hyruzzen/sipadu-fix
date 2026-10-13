@@ -1,17 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  User as FirebaseUser,
-  onAuthStateChanged,
-  signOut as fbSignOut,
-  signInAnonymously
-} from 'firebase/auth';
-import { auth } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { ArchiveService } from '../services/archiveService';
 import { DESA_INFO } from '../data/mockData';
 
 interface AuthContextType {
-  firebaseUser: FirebaseUser | null;
+  firebaseUser: null;
   profile: UserProfile | null;
   role: UserRole | null;
   loading: boolean;
@@ -76,7 +69,7 @@ const OFFICIAL_ACCOUNTS: Record<string, UserProfile> = {
     createdAt: '2025-01-01T08:00:00Z',
     updatedAt: '2025-01-01T08:00:00Z'
   },
-  // Kades Demo: H. Maman Suryaman
+  // Kades Demo: Kepala Desa
   '3204121405710001': {
     id: 'user-kades-1',
     email: 'kades@desa-bojongloa.id',
@@ -99,7 +92,6 @@ const OFFICIAL_ACCOUNTS: Record<string, UserProfile> = {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,67 +111,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Seed initial collections lazily in background only after initial paint
-    const timer = setTimeout(async () => {
-      try {
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
-      } catch {
-        // ignore offline / auth error
-      }
+    const timer = setTimeout(() => {
       ArchiveService.seedInitialDataIfNeeded();
-    }, 1500);
+    }, 1200);
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setFirebaseUser(user);
-      if (user && !user.isAnonymous) {
-        const isUserAdmin = user.email === 'ajamjamaludin45@gmail.com' || user.email?.toLowerCase().includes('admin');
-        const isUserKades = user.email?.toLowerCase().includes('kades');
-
-        let userRole: UserRole = 'warga';
-        if (isUserAdmin) userRole = 'admin';
-        else if (isUserKades) userRole = 'kades';
-
-        try {
-          const existingProfile = await ArchiveService.getUserProfile(user.uid);
-          if (existingProfile) {
-            setProfile(existingProfile);
-            setRole(existingProfile.role);
-            sessionStorage.setItem('desa_current_user', JSON.stringify(existingProfile));
-          } else {
-            const newProfile: UserProfile = {
-              id: user.uid,
-              email: user.email || 'user@bojongloa.desa.id',
-              fullName: user.displayName || 'Warga Desa Bojongloa',
-              role: userRole,
-              nik: '320412' + Math.floor(1000000000 + Math.random() * 9000000000),
-              noKk: '320412' + Math.floor(1000000000 + Math.random() * 9000000000),
-              phone: user.phoneNumber || '0812' + Math.floor(10000000 + Math.random() * 90000000),
-              address: 'Desa Bojongloa RT 01/RW 01',
-              rt: '01',
-              rw: '01',
-              dusun: 'Dusun Bojongloa Pusat',
-              gender: 'L',
-              birthPlace: 'Bandung',
-              birthDate: '1990-01-01',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            };
-            await ArchiveService.saveUserProfile(newProfile);
-            setProfile(newProfile);
-            setRole(newProfile.role);
-            sessionStorage.setItem('desa_current_user', JSON.stringify(newProfile));
-          }
-        } catch {
-          // ignore
-        }
-      }
-      setLoading(false);
-    });
+    setLoading(false);
 
     return () => {
       clearTimeout(timer);
-      unsubscribe();
     };
   }, []);
 
@@ -204,7 +143,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ignore
     }
 
-    // 1. Check locally registered users by NIK (including any accounts created or updated via Manajemen Akun)
+    // 1. Check locally registered users by NIK
     const locallyRegistered = localRegisteredList.find((u) => u.nik === cleanNik);
     if (locallyRegistered) {
       if (locallyRegistered.password && cleanPassword !== locallyRegistered.password) {
@@ -214,12 +153,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRole(locallyRegistered.role);
       localStorage.setItem('desa_current_user', JSON.stringify(locallyRegistered));
       sessionStorage.setItem('desa_current_user', JSON.stringify(locallyRegistered));
-      // Ensure Firebase Auth session exists so Firestore writes are authorized
-      if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
       return locallyRegistered;
     }
 
-    // 2. Search database users from Firestore or archiveService
+    // 2. Search database users from Supabase / archiveService
     try {
       const allUsers = await ArchiveService.getAllUsers();
       const foundUser = allUsers.find(
@@ -234,8 +171,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setRole(foundUser.role);
         localStorage.setItem('desa_current_user', JSON.stringify(foundUser));
         sessionStorage.setItem('desa_current_user', JSON.stringify(foundUser));
-        // Ensure Firebase Auth session exists so Firestore writes are authorized
-        if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
         return foundUser;
       }
     } catch (err: unknown) {
@@ -254,8 +189,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRole(acc.role);
       localStorage.setItem('desa_current_user', JSON.stringify(acc));
       sessionStorage.setItem('desa_current_user', JSON.stringify(acc));
-      // Ensure Firebase Auth session exists so Firestore writes are authorized
-      if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
       return acc;
     }
 
@@ -278,7 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           rt: residentMatch.rt,
           rw: residentMatch.rw,
           address: residentMatch.address,
-          password: cleanPassword, // adopt supplied password
+          password: cleanPassword,
           createdAt: residentMatch.createdAt,
           updatedAt: new Date().toISOString()
         };
@@ -296,10 +229,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (err instanceof Error && err.message.includes('Kata sandi salah')) {
         throw err;
       }
-      // Firestore query error caught, proceed to fallback error message below
     }
 
-    // If 16 digit NIK is entered but not yet registered:
     throw new Error('Nomor NIK belum terdaftar di sistem. Silakan klik tab "Daftar Warga Baru" untuk mendaftar akun.');
   };
 
@@ -320,24 +251,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: 'warga-' + userData.nik,
       fullName: userData.fullName,
       nik: userData.nik,
-      gender: userData.gender, // Gender stored (L or P)
+      gender: userData.gender,
       email: userData.email,
       phone: userData.phone,
-      password: userData.password || 'password123', // Password saved
+      password: userData.password || 'password123',
       dusun: userData.dusun,
       rt: userData.rt,
       rw: userData.rw,
       address: userData.address,
-      role: 'warga', // Registered citizens are strictly 'warga'
+      role: 'warga',
       createdAt: now,
       updatedAt: now
     };
 
-    // Cache immediately in local storage & session storage for persistent offline/fast access
     try {
       const stored = localStorage.getItem('desa_registered_users') || sessionStorage.getItem('desa_registered_users');
       const list: UserProfile[] = stored ? JSON.parse(stored) : [];
-      // avoid duplicates
       const filtered = list.filter((u) => u.nik !== newCitizenProfile.nik);
       filtered.push(newCitizenProfile);
       localStorage.setItem('desa_registered_users', JSON.stringify(filtered));
@@ -351,13 +280,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('desa_current_user', JSON.stringify(newCitizenProfile));
     sessionStorage.setItem('desa_current_user', JSON.stringify(newCitizenProfile));
 
-    // Save to Firestore in background with timeout safety so user registration never hangs
-    Promise.race([
-      ArchiveService.saveUserProfile(newCitizenProfile),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2500))
-    ]).catch((err) => {
-      console.warn('Background sync to Firestore skipped or timed out:', err);
-    });
+    try {
+      await ArchiveService.saveUserProfile(newCitizenProfile);
+    } catch (err) {
+      console.warn('Sync to database skipped:', err);
+    }
 
     return newCitizenProfile;
   };
@@ -382,14 +309,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    try {
-      await fbSignOut(auth);
-    } catch {
-      // Ignore
-    }
     localStorage.removeItem('desa_current_user');
     sessionStorage.removeItem('desa_current_user');
-    setFirebaseUser(null);
     setProfile(null);
     setRole(null);
   };
@@ -397,7 +318,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider
       value={{
-        firebaseUser,
+        firebaseUser: null,
         profile,
         role,
         loading,

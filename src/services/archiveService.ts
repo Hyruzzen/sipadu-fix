@@ -1,27 +1,10 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  writeBatch
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { signInAnonymously } from 'firebase/auth';
-import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
+import { supabase } from '../lib/supabase';
 import { Resident, Submission, SubmissionStatus, SubmissionType, UserProfile } from '../types';
-import { INITIAL_RESIDENTS, INITIAL_SUBMISSIONS, DESA_INFO } from '../data/mockData';
+import { DESA_INFO } from '../data/mockData';
 
-const SUBMISSIONS_COLLECTION = 'submissions';
-const RESIDENTS_COLLECTION = 'residents';
-const USERS_COLLECTION = 'users';
-const ADMINS_COLLECTION = 'admins';
+const SUBMISSIONS_TABLE = 'submissions';
+const RESIDENTS_TABLE = 'residents';
+const USERS_TABLE = 'users';
 
 export const FORBIDDEN_DETAIL_KEYS = [
   'anakKe', 'kelahiranKe', 'anak_ke',
@@ -63,7 +46,6 @@ const getStoredSubmissions = (): Submission[] => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // Clean out any lingering seeder submissions
         const cleaned = parsed
           .filter((s: any) => !s.id?.startsWith('sub-00'))
           .map(sanitizeSubmission);
@@ -93,7 +75,6 @@ const getStoredResidents = (): Resident[] => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        // Clean out any lingering seeder residents
         const cleaned = parsed.filter((r: any) => !r.id?.startsWith('res-') || r.id?.length > 8);
         saveStoredResidents(cleaned);
         return cleaned;
@@ -185,7 +166,6 @@ const getStoredUsers = (): UserProfile[] => {
         return parsed;
       }
     }
-    // Initialize with default official users
     localStorage.setItem('desa_users_initialized', 'true');
     localStorage.setItem('desa_registered_users', JSON.stringify(DEFAULT_OFFICIAL_USERS));
     return [...DEFAULT_OFFICIAL_USERS];
@@ -194,29 +174,24 @@ const getStoredUsers = (): UserProfile[] => {
   }
 };
 
-// In-memory sync fallback for offline/demo reliability
 let localSubmissions: Submission[] = getStoredSubmissions();
 let localResidents: Resident[] = getStoredResidents();
 
 export const ArchiveService = {
-  // Seed default official user accounts to Firestore if not already present
+  // Sync default accounts to Supabase if not present
   async seedInitialDataIfNeeded(): Promise<void> {
     try {
-      // --- 1. Seed users collection ---
-      const usersSnap = await getDocs(collection(db, USERS_COLLECTION));
-      const existingUserIds = new Set(usersSnap.docs.map(d => d.id));
+      // 1. Seed users
+      const { data: remoteUsers } = await supabase.from(USERS_TABLE).select('id');
+      const existingUserIds = new Set((remoteUsers || []).map((u: any) => u.id));
 
-      const usersBatch = writeBatch(db);
-      let hasNewUsers = false;
       for (const user of DEFAULT_OFFICIAL_USERS) {
         if (!existingUserIds.has(user.id)) {
-          usersBatch.set(doc(db, USERS_COLLECTION, user.id), user);
-          hasNewUsers = true;
+          await supabase.from(USERS_TABLE).upsert(user);
         }
       }
-      if (hasNewUsers) await usersBatch.commit();
 
-      // Also ensure they are in localStorage
+      // Sync local storage
       const localUsers = getStoredUsers();
       const localIds = new Set(localUsers.map(u => u.id));
       const mergedUsers = [...localUsers];
@@ -224,85 +199,46 @@ export const ArchiveService = {
         if (!localIds.has(user.id)) mergedUsers.push(user);
       }
       localStorage.setItem('desa_registered_users', JSON.stringify(mergedUsers));
-
-      // --- 2. Seed admins collection (RBAC lookup table) ---
-      const adminsSnap = await getDocs(collection(db, ADMINS_COLLECTION));
-      const existingAdminIds = new Set(adminsSnap.docs.map(d => d.id));
-
-      const adminsBatch = writeBatch(db);
-      let hasNewAdmins = false;
-      for (const user of DEFAULT_OFFICIAL_USERS) {
-        if ((user.role === 'admin' || user.role === 'kades') && !existingAdminIds.has(user.id)) {
-          adminsBatch.set(doc(db, ADMINS_COLLECTION, user.id), {
-            userId: user.id,
-            email: user.email,
-            role: user.role
-          });
-          hasNewAdmins = true;
-        }
-      }
-      if (hasNewAdmins) await adminsBatch.commit();
-
-      // --- 3. Sync any local submissions not yet in Firestore ---
-      const subsSnap = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
-      const existingSubIds = new Set(subsSnap.docs.map(d => d.id));
-      const localSubs = getStoredSubmissions();
-      const newSubs = localSubs.filter(s => !existingSubIds.has(s.id));
-      if (newSubs.length > 0) {
-        const CHUNK = 450;
-        for (let i = 0; i < newSubs.length; i += CHUNK) {
-          const b = writeBatch(db);
-          newSubs.slice(i, i + CHUNK).forEach(s => b.set(doc(db, SUBMISSIONS_COLLECTION, s.id), s));
-          await b.commit();
-        }
-      }
-
-      // --- 4. Sync any local residents not yet in Firestore ---
-      const resSnap = await getDocs(collection(db, RESIDENTS_COLLECTION));
-      const existingResIds = new Set(resSnap.docs.map(d => d.id));
-      const localRes = getStoredResidents();
-      const newRes = localRes.filter(r => !existingResIds.has(r.id));
-      if (newRes.length > 0) {
-        const CHUNK = 450;
-        for (let i = 0; i < newRes.length; i += CHUNK) {
-          const b = writeBatch(db);
-          newRes.slice(i, i + CHUNK).forEach(r => b.set(doc(db, RESIDENTS_COLLECTION, r.id), r));
-          await b.commit();
-        }
-      }
-    } catch {
-      // Firestore not available - local storage will still have the official users
+    } catch (err) {
+      console.warn('Supabase seed initial notice (fallback local):', err);
     }
   },
 
   // 1. Submissions Operations
   async getSubmissions(userId?: string, role?: string): Promise<Submission[]> {
     try {
-      const snap = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
-      const firestoreItems = !snap.empty ? snap.docs.map(d => sanitizeSubmission({ id: d.id, ...d.data() } as Submission)) : [];
-      const currentLocal = getStoredSubmissions();
-      const map = new Map<string, Submission>();
-      currentLocal.forEach(s => map.set(s.id, s));
-      firestoreItems.forEach(s => map.set(s.id, s));
-
-      let all = Array.from(map.values()).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      if (role === 'warga') {
-        if (!userId) return [];
-        all = all.filter(s => s.userId === userId);
+      let query = supabase.from(SUBMISSIONS_TABLE).select('*').order('createdAt', { ascending: false });
+      if (role === 'warga' && userId) {
+        query = query.eq('userId', userId);
       }
-      return all;
+      const { data, error } = await query;
+
+      if (!error && data) {
+        const remoteItems = data.map((d: any) => sanitizeSubmission(d as Submission));
+        const currentLocal = getStoredSubmissions();
+        const map = new Map<string, Submission>();
+        currentLocal.forEach(s => map.set(s.id, s));
+        remoteItems.forEach(s => map.set(s.id, s));
+
+        let all = Array.from(map.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        if (role === 'warga') {
+          if (!userId) return [];
+          all = all.filter(s => s.userId === userId);
+        }
+        return all;
+      }
     } catch (err) {
-      console.warn('Error fetching Firestore submissions, using local cache:', err);
-      const currentLocal = getStoredSubmissions();
-      if (role === 'warga') {
-        if (!userId) return [];
-        return currentLocal.filter(s => s.userId === userId);
-      }
-      return currentLocal;
+      console.warn('Error fetching Supabase submissions, using local cache:', err);
     }
+
+    const currentLocal = getStoredSubmissions();
+    if (role === 'warga') {
+      if (!userId) return [];
+      return currentLocal.filter(s => s.userId === userId);
+    }
+    return currentLocal;
   },
 
   listenSubmissions(
@@ -310,44 +246,25 @@ export const ArchiveService = {
     role: string | undefined,
     callback: (subs: Submission[]) => void
   ): () => void {
-    const emitCombined = (firestoreItems: Submission[]) => {
-      const currentLocal = getStoredSubmissions();
-      const map = new Map<string, Submission>();
-      currentLocal.forEach(s => map.set(s.id, s));
-      firestoreItems.forEach(s => map.set(s.id, sanitizeSubmission(s)));
-
-      let all = Array.from(map.values()).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-
-      if (role === 'warga') {
-        if (!userId) {
-          callback([]);
-          return;
-        }
-        all = all.filter(s => s.userId === userId);
-      }
-      callback(all);
+    const fetchAndEmit = async () => {
+      const items = await this.getSubmissions(userId, role);
+      callback(items);
     };
 
-    // Immediately emit current data so user sees their new or existing records without waiting
-    emitCombined([]);
+    fetchAndEmit();
 
     try {
-      const colRef = collection(db, SUBMISSIONS_COLLECTION);
-      return onSnapshot(
-        colRef,
-        (snap) => {
-          const items = snap.docs.map(d => sanitizeSubmission({ id: d.id, ...d.data() } as Submission));
-          emitCombined(items);
-        },
-        (error) => {
-          console.warn('Firestore listen note:', error);
-          emitCombined([]);
-        }
-      );
+      const channel = supabase
+        .channel('public:submissions')
+        .on('postgres_changes', { event: '*', schema: 'public', table: SUBMISSIONS_TABLE }, () => {
+          fetchAndEmit();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } catch {
-      emitCombined([]);
       return () => {};
     }
   },
@@ -363,18 +280,13 @@ export const ArchiveService = {
       updatedAt: now,
     });
 
-    // 1. Immediately store in local cache & storage so it is 100% recorded
     localSubmissions = [newSubmission, ...localSubmissions.filter(s => s.id !== newId)];
     saveStoredSubmissions(localSubmissions);
 
-    // 2. Persist to Firestore database
     try {
-      if (!auth.currentUser) {
-        await signInAnonymously(auth).catch(() => {});
-      }
-      await setDoc(doc(db, SUBMISSIONS_COLLECTION, newId), newSubmission);
+      await supabase.from(SUBMISSIONS_TABLE).upsert(newSubmission);
     } catch (err) {
-      console.warn('Firestore write notice (handled):', err);
+      console.warn('Supabase submission write notice:', err);
     }
 
     return newSubmission;
@@ -398,78 +310,69 @@ export const ArchiveService = {
     };
 
     try {
-      if (!auth.currentUser) {
-        await signInAnonymously(auth).catch(() => {});
-      }
-      // Use setDoc with merge: true so it succeeds even if document was created locally or offline
-      await setDoc(doc(db, SUBMISSIONS_COLLECTION, submissionId), updates, { merge: true });
+      await supabase.from(SUBMISSIONS_TABLE).update(updates).eq('id', submissionId);
     } catch (err) {
-      console.warn('Firestore update notice (fallback to local):', err);
+      console.warn('Supabase submission update notice:', err);
     }
 
-    // sync local & storage
     localSubmissions = localSubmissions.map(s => s.id === submissionId ? { ...s, ...updates } : s);
     saveStoredSubmissions(localSubmissions);
   },
 
   async deleteSubmission(submissionId: string): Promise<void> {
     try {
-      await deleteDoc(doc(db, SUBMISSIONS_COLLECTION, submissionId));
+      await supabase.from(SUBMISSIONS_TABLE).delete().eq('id', submissionId);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `${SUBMISSIONS_COLLECTION}/${submissionId}`);
+      console.warn('Supabase submission delete notice:', err);
     }
     localSubmissions = localSubmissions.filter(s => s.id !== submissionId);
     saveStoredSubmissions(localSubmissions);
   },
 
-  // 2. Residents Operations (Master Kependudukan)
+  // 2. Residents Operations (Master Data Penduduk)
   async getResidents(): Promise<Resident[]> {
     try {
-      const snap = await getDocs(collection(db, RESIDENTS_COLLECTION));
-      if (!snap.empty) {
-        const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Resident));
-        localResidents = items;
-        saveStoredResidents(items);
-        return items;
+      const { data, error } = await supabase.from(RESIDENTS_TABLE).select('*').order('fullName', { ascending: true });
+      if (!error && data && data.length > 0) {
+        localResidents = data as Resident[];
+        saveStoredResidents(localResidents);
+        return localResidents;
       }
-      return getStoredResidents();
     } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, RESIDENTS_COLLECTION);
-      return getStoredResidents();
+      console.warn('Supabase getResidents notice:', err);
     }
+    return getStoredResidents();
   },
 
   listenResidents(callback: (residents: Resident[]) => void): () => void {
+    const fetchAndEmit = async () => {
+      const list = await this.getResidents();
+      callback(list);
+    };
+
+    fetchAndEmit();
+
     try {
-      const colRef = collection(db, RESIDENTS_COLLECTION);
-      return onSnapshot(
-        colRef,
-        (snap) => {
-          if (!snap.empty) {
-            const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Resident));
-            localResidents = items;
-            saveStoredResidents(items);
-            callback(items);
-          } else {
-            callback(getStoredResidents());
-          }
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.LIST, RESIDENTS_COLLECTION);
-          callback(getStoredResidents());
-        }
-      );
+      const channel = supabase
+        .channel('public:residents')
+        .on('postgres_changes', { event: '*', schema: 'public', table: RESIDENTS_TABLE }, () => {
+          fetchAndEmit();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } catch {
-      callback(getStoredResidents());
       return () => {};
     }
   },
 
   async saveResident(resident: Resident): Promise<void> {
     try {
-      await setDoc(doc(db, RESIDENTS_COLLECTION, resident.id), resident);
+      await supabase.from(RESIDENTS_TABLE).upsert(resident);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `${RESIDENTS_COLLECTION}/${resident.id}`);
+      console.warn('Supabase saveResident notice:', err);
     }
     const idx = localResidents.findIndex(r => r.id === resident.id);
     if (idx >= 0) {
@@ -483,35 +386,28 @@ export const ArchiveService = {
   async saveResidentsBatch(newResidents: Resident[]): Promise<void> {
     if (!newResidents || newResidents.length === 0) return;
 
-    // 1. Immediately merge with local in-memory cache and localStorage
     const map = new Map<string, Resident>();
     localResidents.forEach((r) => map.set(r.id, r));
     newResidents.forEach((r) => map.set(r.id, r));
     localResidents = Array.from(map.values());
     saveStoredResidents(localResidents);
 
-    // 2. Persist to Firestore in batches of 450
     try {
-      const BATCH_SIZE = 450;
+      const BATCH_SIZE = 100;
       for (let i = 0; i < newResidents.length; i += BATCH_SIZE) {
         const chunk = newResidents.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db);
-        chunk.forEach((resident) => {
-          const docRef = doc(db, RESIDENTS_COLLECTION, resident.id);
-          batch.set(docRef, resident);
-        });
-        await batch.commit();
+        await supabase.from(RESIDENTS_TABLE).upsert(chunk);
       }
     } catch (err) {
-      console.warn('Firestore batch write notice (fallback to local):', err);
+      console.warn('Supabase saveResidentsBatch notice:', err);
     }
   },
 
   async deleteResident(residentId: string): Promise<void> {
     try {
-      await deleteDoc(doc(db, RESIDENTS_COLLECTION, residentId));
+      await supabase.from(RESIDENTS_TABLE).delete().eq('id', residentId);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `${RESIDENTS_COLLECTION}/${residentId}`);
+      console.warn('Supabase deleteResident notice:', err);
     }
     localResidents = localResidents.filter(r => r.id !== residentId);
     saveStoredResidents(localResidents);
@@ -523,15 +419,9 @@ export const ArchiveService = {
     saveStoredSubmissions([]);
     saveStoredResidents([]);
     try {
-      const snapRes = await getDocs(collection(db, RESIDENTS_COLLECTION));
-      for (const d of snapRes.docs) {
-        await deleteDoc(d.ref);
-      }
-      const snapSub = await getDocs(collection(db, SUBMISSIONS_COLLECTION));
-      for (const d of snapSub.docs) {
-        await deleteDoc(d.ref);
-      }
-    } catch (e) {
+      await supabase.from(RESIDENTS_TABLE).delete().neq('id', '');
+      await supabase.from(SUBMISSIONS_TABLE).delete().neq('id', '');
+    } catch {
       // ignore
     }
   },
@@ -539,24 +429,24 @@ export const ArchiveService = {
   // 3. User Profile Operations
   async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
-      if (snap.exists()) {
-        return snap.data() as UserProfile;
+      const { data, error } = await supabase.from(USERS_TABLE).select('*').eq('id', userId).maybeSingle();
+      if (!error && data) {
+        return data as UserProfile;
       }
-      return null;
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `${USERS_COLLECTION}/${userId}`);
-      return null;
+      console.warn('Supabase getUserProfile notice:', err);
     }
+    const local = getStoredUsers();
+    return local.find(u => u.id === userId) || null;
   },
 
   async saveUserProfile(profile: UserProfile): Promise<void> {
     try {
-      await setDoc(doc(db, USERS_COLLECTION, profile.id), profile);
+      await supabase.from(USERS_TABLE).upsert(profile);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `${USERS_COLLECTION}/${profile.id}`);
+      console.warn('Supabase saveUserProfile notice:', err);
     }
-    // Sync local storage registered users list
+
     try {
       const list = getStoredUsers();
       const idx = list.findIndex(u => u.id === profile.id || (profile.nik && u.nik === profile.nik));
@@ -573,9 +463,9 @@ export const ArchiveService = {
 
   async deleteUser(userId: string): Promise<void> {
     try {
-      await deleteDoc(doc(db, USERS_COLLECTION, userId));
+      await supabase.from(USERS_TABLE).delete().eq('id', userId);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `${USERS_COLLECTION}/${userId}`);
+      console.warn('Supabase deleteUser notice:', err);
     }
     try {
       const list = getStoredUsers();
@@ -589,19 +479,21 @@ export const ArchiveService = {
   async getAllUsers(): Promise<UserProfile[]> {
     const localUsers = getStoredUsers();
     try {
-      const snap = await getDocs(collection(db, USERS_COLLECTION));
-      const firestoreUsers = snap.docs.map(d => d.data() as UserProfile);
-      const map = new Map<string, UserProfile>();
-      localUsers.forEach(u => map.set(u.id, u));
-      firestoreUsers.forEach(u => map.set(u.id, u));
-      return Array.from(map.values());
+      const { data, error } = await supabase.from(USERS_TABLE).select('*');
+      if (!error && data && data.length > 0) {
+        const remoteUsers = data as UserProfile[];
+        const map = new Map<string, UserProfile>();
+        localUsers.forEach(u => map.set(u.id, u));
+        remoteUsers.forEach(u => map.set(u.id, u));
+        return Array.from(map.values());
+      }
     } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, USERS_COLLECTION);
-      return localUsers;
+      console.warn('Supabase getAllUsers notice:', err);
     }
+    return localUsers;
   },
 
-  // Helper to generate Official Registration Number: REG-474.X / NoUrut / ARSIP-BJL / BulanRomawi / Tahun
+  // Helper to generate Official Registration Number
   generateNomorRegistrasi(type: SubmissionType, sequence: number = 1): string {
     const romanMonths = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
     const currentMonth = romanMonths[new Date().getMonth()];
@@ -617,7 +509,6 @@ export const ArchiveService = {
     return `REG-${kodeKlasifikasi}/${padSeq}/ARSIP-BJL/${currentMonth}/${currentYear}`;
   },
 
-  // Backward compatibility alias
   generateSuratNumber(type: SubmissionType, sequence: number = 1): string {
     return this.generateNomorRegistrasi(type, sequence);
   }
