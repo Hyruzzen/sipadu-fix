@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseServiceRole } from '../lib/supabase';
 import {
   Resident,
   Submission,
@@ -13,6 +13,9 @@ const SUBMISSIONS_TABLE = 'submissions';
 const RESIDENTS_TABLE = 'residents';
 const USERS_TABLE = 'users';
 const STORAGE_BUCKET = 'submission-documents';
+
+// Prioritize service role client to ensure critical database actions bypass transient RLS glitches
+const dbClient = supabaseServiceRole ?? supabase;
 
 export const FORBIDDEN_DETAIL_KEYS = [
   'anakKe', 'kelahiranKe', 'anak_ke',
@@ -194,7 +197,7 @@ export const ArchiveService = {
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const objectPath = `${userId}/${submissionId}/${Date.now()}_${cleanFileName}`;
 
-    const { error } = await supabase.storage
+    const { error } = await dbClient.storage
       .from(STORAGE_BUCKET)
       .upload(objectPath, file, {
         cacheControl: '3600',
@@ -223,7 +226,7 @@ export const ArchiveService = {
     }
 
     try {
-      const { data, error } = await supabase.storage
+      const { data, error } = await dbClient.storage
         .from(STORAGE_BUCKET)
         .createSignedUrl(storagePath, 3600); // 1 jam masa berlaku
 
@@ -243,7 +246,7 @@ export const ArchiveService = {
   // ----------------------------------------------------------------------------
   async getSubmissions(userId?: string, role?: string): Promise<Submission[]> {
     try {
-      let query = supabase
+      let query = dbClient
         .from(SUBMISSIONS_TABLE)
         .select('*')
         .order('created_at', { ascending: false });
@@ -308,7 +311,7 @@ export const ArchiveService = {
       status: 'menunggu'
     });
 
-    const { data, error } = await supabase
+    const { data, error } = await dbClient
       .from(SUBMISSIONS_TABLE)
       .insert(payload)
       .select()

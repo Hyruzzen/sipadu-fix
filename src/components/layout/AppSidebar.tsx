@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useNavigation, AppRoute } from '../../context/NavigationContext';
 import { ArchiveService } from '../../services/archiveService';
 import { KabupatenBandungLogo } from '../KabupatenBandungLogo';
-import { DESA_INFO } from '../../data/mockData';
 import {
   LayoutDashboard,
   FileCheck,
@@ -24,11 +24,11 @@ import {
 interface AppSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
-  currentTab: string;
-  setCurrentTab: (tab: string) => void;
-  viewMode: 'landing' | 'portal' | 'auth';
-  setViewMode: (mode: 'landing' | 'portal' | 'auth') => void;
-  onOpenAuth: (mode?: 'login' | 'register') => void;
+  currentTab?: string;
+  setCurrentTab?: (tab: string) => void;
+  viewMode?: 'landing' | 'portal' | 'auth';
+  setViewMode?: (mode: 'landing' | 'portal' | 'auth') => void;
+  onOpenAuth?: (mode?: 'login' | 'register') => void;
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = ({
@@ -41,6 +41,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onOpenAuth,
 }) => {
   const { profile, role, logout } = useAuth();
+  const { currentRoute, navigateTo } = useNavigation();
   const [pendingSubmissions, setPendingSubmissions] = useState(0);
 
   // Listen to pending submissions for admin badge
@@ -53,6 +54,30 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       return () => unsub();
     }
   }, [role]);
+
+  const handleNavigate = (route: AppRoute) => {
+    navigateTo(route);
+
+    // Call legacy props if provided for full backward-compatibility
+    if (setCurrentTab) setCurrentTab(route);
+    if (setViewMode) {
+      if (route === 'landing') setViewMode('landing');
+      else if (route === 'login' || route === 'register') setViewMode('auth');
+      else setViewMode('portal');
+    }
+
+    // Auto-close sidebar on mobile
+    if (window.innerWidth < 1024 && isOpen) {
+      onToggle();
+    }
+  };
+
+  const isRouteActive = (route: AppRoute) => {
+    if (currentRoute === route) return true;
+    if (route === 'persetujuan' && (currentRoute === 'persetujuan' || currentTab === 'pengajuan')) return true;
+    if (route === 'landing' && (currentRoute === 'landing' || viewMode === 'landing')) return true;
+    return false;
+  };
 
   const getRoleName = () => {
     if (!profile) return 'Tamu';
@@ -89,10 +114,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         {/* BRAND HEADER & COLLAPSE TOGGLE */}
         <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-800">
           <div
-            onClick={() => {
-              setViewMode('landing');
-              setCurrentTab('beranda');
-            }}
+            onClick={() => handleNavigate('landing')}
             className="flex items-center gap-3 cursor-pointer group overflow-hidden"
           >
             <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md p-1.5 shrink-0 group-hover:scale-105 transition-transform">
@@ -116,7 +138,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             onClick={onToggle}
             title={isOpen ? 'Tutup Sidebar' : 'Buka Sidebar'}
             aria-label={isOpen ? 'Tutup Sidebar' : 'Buka Sidebar'}
-            className="p-1.5 text-gray-300 hover:text-gray-100 hover:bg-gray-700/80 rounded-xl transition-colors shrink-0"
+            className="p-1.5 text-gray-300 hover:text-gray-100 hover:bg-gray-700/80 rounded-xl transition-colors shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -134,20 +156,17 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
             {/* Beranda / Landing Page */}
             <button
-              onClick={() => {
-                setViewMode('landing');
-                setCurrentTab('beranda');
-              }}
+              onClick={() => handleNavigate('landing')}
               title="Portal Berita Desa Bojongloa"
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                viewMode === 'landing'
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                isRouteActive('landing')
                   ? 'bg-emerald-600 text-white shadow-xs font-bold'
                   : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
               } ${!isOpen && 'justify-center px-0'}`}
             >
               <Home
                 className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
-                  viewMode === 'landing' ? 'text-white' : 'text-gray-400 group-hover:text-gray-100'
+                  isRouteActive('landing') ? 'text-white' : 'text-gray-400 group-hover:text-gray-100'
                 }`}
               />
               {isOpen && <span>Portal Berita & Beranda</span>}
@@ -171,13 +190,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               {role === 'warga' && (
                 <>
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('pengajuan');
-                    }}
+                    onClick={() => handleNavigate('pengajuan')}
                     title="Pencatatan Kependudukan"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'pengajuan'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('pengajuan')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -187,13 +203,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('riwayat');
-                    }}
+                    onClick={() => handleNavigate('riwayat')}
                     title="Riwayat Pencatatan Warga"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'riwayat'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('riwayat')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -203,13 +216,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('profil');
-                    }}
+                    onClick={() => handleNavigate('profil')}
                     title="Profil Kependudukan Saya"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'profil'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('profil')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -219,13 +229,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('pengaturan');
-                    }}
+                    onClick={() => handleNavigate('pengaturan')}
                     title="Pengaturan Akun"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'pengaturan'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('pengaturan')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -240,13 +247,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               {role === 'admin' && (
                 <>
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('dashboard');
-                    }}
+                    onClick={() => handleNavigate('dashboard')}
                     title="Dashboard Kependudukan"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'dashboard'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('dashboard')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -256,13 +260,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('pengajuan');
-                    }}
+                    onClick={() => handleNavigate('persetujuan')}
                     title="Persetujuan Berkas"
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && (currentTab === 'pengajuan' || currentTab === 'persetujuan')
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('persetujuan')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -279,13 +280,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('penduduk');
-                    }}
+                    onClick={() => handleNavigate('penduduk')}
                     title="Master Data Penduduk Bojongloa"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'penduduk'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('penduduk')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -295,13 +293,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('laporan');
-                    }}
+                    onClick={() => handleNavigate('laporan')}
                     title="Laporan & Rekapitulasi Mutasi"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'laporan'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('laporan')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -311,13 +306,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('akun');
-                    }}
+                    onClick={() => handleNavigate('akun')}
                     title="Manajemen Akun Staf"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'akun'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('akun')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -332,13 +324,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               {role === 'kades' && (
                 <>
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('dashboard');
-                    }}
+                    onClick={() => handleNavigate('dashboard')}
                     title="Dashboard Eksekutif Kades"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'dashboard'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('dashboard')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-emerald-400 hover:bg-emerald-100 hover:text-emerald-800'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -348,13 +337,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   </button>
 
                   <button
-                    onClick={() => {
-                      setViewMode('portal');
-                      setCurrentTab('laporan');
-                    }}
+                    onClick={() => handleNavigate('laporan')}
                     title="Laporan Kependudukan Kades"
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
-                      viewMode === 'portal' && currentTab === 'laporan'
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer ${
+                      isRouteActive('laporan')
                         ? 'bg-emerald-600 text-white shadow-xs font-bold'
                         : 'text-emerald-400 hover:bg-emerald-100 hover:text-emerald-800'
                     } ${!isOpen && 'justify-center px-0'}`}
@@ -380,7 +366,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                   {getRoleName().toUpperCase()}
                 </span>
                 <button
-                  onClick={logout}
+                  onClick={() => {
+                    logout();
+                    handleNavigate('landing');
+                  }}
                   title="Keluar dari akun"
                   className="flex items-center gap-1 text-[11px] font-semibold text-gray-300 hover:text-gray-100 hover:bg-gray-700 px-2 py-1 rounded-lg transition-colors cursor-pointer"
                 >
@@ -398,7 +387,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                     {profile.fullName}
                   </div>
                   <div className="text-[10px] text-gray-300 font-mono truncate">
-                    NIK: {profile.nik}
+                    NIK: {profile.nik || '-'}
                   </div>
                 </div>
               </div>
@@ -407,14 +396,20 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             /* Tamu / Belum Login: Tombol Masuk & Daftar */
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => onOpenAuth('login')}
+                onClick={() => {
+                  if (onOpenAuth) onOpenAuth('login');
+                  else handleNavigate('login');
+                }}
                 className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>Masuk</span>
               </button>
               <button
-                onClick={() => onOpenAuth('register')}
+                onClick={() => {
+                  if (onOpenAuth) onOpenAuth('register');
+                  else handleNavigate('register');
+                }}
                 className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs border border-gray-700 transition-colors shadow-2xs cursor-pointer"
               >
                 <UserPlus className="w-3.5 h-3.5" />

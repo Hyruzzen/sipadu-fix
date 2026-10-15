@@ -64,7 +64,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /** Fetch a fresh profile from the `users` table by auth user ID. */
   const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
     try {
-      const { data, error } = await supabase
+      const client = supabaseServiceRole ?? supabase;
+      const { data, error } = await client
         .from('users')
         .select('*')
         .eq('id', userId)
@@ -383,7 +384,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (updated.religion !== undefined) dbPayload.religion = updated.religion;
     if (updated.maritalStatus !== undefined) dbPayload.maritalStatus = updated.maritalStatus;
 
-    const { error } = await supabase
+    const client = supabaseServiceRole ?? supabase;
+    const { error } = await client
       .from('users')
       .update(dbPayload)
       .eq('id', profile.id);

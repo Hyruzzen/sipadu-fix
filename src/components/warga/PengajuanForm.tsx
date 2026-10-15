@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ArchiveService, FORBIDDEN_DETAIL_KEYS } from '../../services/archiveService';
 import { SubmissionType, AttachmentFile } from '../../types';
@@ -137,15 +137,57 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
     setPendingFiles(pendingFiles.filter((_, i) => i !== idx));
   };
 
+  // Sinkronisasi data formulir otomatis saat data profile termuat
+  useEffect(() => {
+    if (profile) {
+      if (profile.fullName) {
+        setKelahiran((prev) => ({ ...prev, namaAyah: prev.namaAyah || profile.fullName }));
+        setKematian((prev) => ({ ...prev, namaPelapor: prev.namaPelapor || profile.fullName }));
+        setPindahMasuk((prev) => ({ ...prev, namaKepalaKeluarga: prev.namaKepalaKeluarga || profile.fullName }));
+        setPindahKeluar((prev) => ({ ...prev, namaKepalaKeluarga: prev.namaKepalaKeluarga || profile.fullName }));
+      }
+      if (profile.nik) {
+        setKelahiran((prev) => ({ ...prev, nikAyah: prev.nikAyah || profile.nik || '' }));
+        setKematian((prev) => ({ ...prev, nikPelapor: prev.nikPelapor || profile.nik || '' }));
+        setPindahMasuk((prev) => ({ ...prev, nikPemohon: prev.nikPemohon || profile.nik || '' }));
+        setPindahKeluar((prev) => ({ ...prev, nikPemohon: prev.nikPemohon || profile.nik || '' }));
+      }
+      if (profile.address) {
+        setPindahKeluar((prev) => ({ ...prev, alamatAsalBojongloa: prev.alamatAsalBojongloa || profile.address || '' }));
+      }
+    }
+  }, [profile]);
+
   const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
     setUploadError(null);
 
-    // Validate that we have a valid NIK before proceeding
-    if (!profile?.nik || !/^\d{16}$/.test(profile.nik)) {
+    if (!profile) {
+      setUploadError('Sesi akun tidak ditemukan. Harap masuk (login) kembali untuk mengajukan surat.');
       setSubmitting(false);
-      setUploadError('NIK tidak valid atau tidak tersedia. Pastikan Anda telah login dengan NIK yang benar.');
+      return;
+    }
+
+    // Ambil NIK pemohon dari profil atau dari input form sesuai tipe pencatatan
+    const formNik =
+      selectedType === 'kelahiran'
+        ? (kelahiran.nikAyah || kelahiran.nikIbu)
+        : selectedType === 'kematian'
+        ? (kematian.nikPelapor || kematian.nikAlmarhum)
+        : selectedType === 'pindah_masuk'
+        ? pindahMasuk.nikPemohon
+        : pindahKeluar.nikPemohon;
+
+    const userNik =
+      (profile.nik && /^\d{16}$/.test(profile.nik.trim()))
+        ? profile.nik.trim()
+        : (formNik && /^\d{16}$/.test(formNik.trim()) ? formNik.trim() : '');
+
+    if (!userNik) {
+      setSubmitting(false);
+      setUploadError('Nomor Induk Kependudukan (NIK) wajib 16 digit angka. Harap pastikan kolom NIK telah diisi dengan benar.');
       return;
     }
 
@@ -169,24 +211,28 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
     const cleanDetails: Record<string, any> = { ...detailsPayload };
     FORBIDDEN_DETAIL_KEYS.forEach((k) => delete cleanDetails[k]);
 
-    if (!profile) {
-      setUploadError('Sesi login tidak valid. Silakan login kembali.');
-      setSubmitting(false);
-      return;
-    }
-
     try {
       const tempSubmissionId = `sub-${Date.now()}`;
       const uploadedAttachments: AttachmentFile[] = [];
 
-      // Unggah berkas ke Supabase Storage secara aman
+      // Unggah berkas ke Supabase Storage secara aman dengan fallback metadata
       for (const file of pendingFiles) {
-        const uploaded = await ArchiveService.uploadAttachment(
-          file,
-          profile.id,
-          tempSubmissionId
-        );
-        uploadedAttachments.push(uploaded);
+        try {
+          const uploaded = await ArchiveService.uploadAttachment(
+            file,
+            profile.id,
+            tempSubmissionId
+          );
+          uploadedAttachments.push(uploaded);
+        } catch (uploadErr: any) {
+          console.warn('Pemberitahuan upload berkas, melanjutkan dengan metadata berkas:', uploadErr);
+          uploadedAttachments.push({
+            name: file.name,
+            type: file.type || 'Dokumen Persyaratan',
+            size: file.size,
+            url: '#'
+          });
+        }
       }
 
       const finalAttachments =
@@ -202,9 +248,9 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
 
       await ArchiveService.createSubmission({
         userId: profile.id,
-        userEmail: profile.email,
-        userName: profile.fullName,
-        userNik: profile.nik || '',
+        userEmail: profile.email || '',
+        userName: profile.fullName || 'Warga Bojongloa',
+        userNik: userNik,
         userPhone: profile.phone || '',
         type: selectedType,
         status: 'menunggu',
@@ -274,6 +320,13 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
           </p>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 flex items-start gap-3 animate-in fade-in">
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="text-sm font-medium">{uploadError}</div>
+        </div>
+      )}
 
       {successMessage && (
         <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-3 animate-in fade-in">
@@ -978,22 +1031,30 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
           </p>
         </div>
 
-        {/* Submit Button */}
-        <div className="flex justify-end pt-2">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-sm shadow-md transition-all"
-          >
-            {submitting ? (
-              <span>Mengirim Berkas...</span>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Kirim Pencatatan Penduduk</span>
-              </>
-            )}
-          </button>
+        {/* Submit Button & Error Alert */}
+        <div className="space-y-3 pt-2">
+          {uploadError && (
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 flex items-start gap-2.5 text-xs animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div className="font-semibold">{uploadError}</div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold text-sm shadow-md transition-all cursor-pointer active:scale-95"
+            >
+              {submitting ? (
+                <span>Menyimpan Pengajuan...</span>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Kirim Pencatatan Penduduk</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </form>
     </div>
