@@ -1,316 +1,412 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase, supabaseServiceRole } from '../lib/supabase';
 import { UserProfile, UserRole } from '../types';
-import { ArchiveService } from '../services/archiveService';
-import { DESA_INFO } from '../data/mockData';
 
 interface AuthContextType {
-  firebaseUser: null;
+  supabaseUser: SupabaseUser | null;
   profile: UserProfile | null;
   role: UserRole | null;
   loading: boolean;
-  loginWithNik: (nik: string, password?: string) => Promise<UserProfile>;
+  loginWithNik: (nikOrIdentifier: string, password: string) => Promise<UserProfile>;
   register: (userData: {
     fullName: string;
     nik: string;
     gender: 'L' | 'P';
     email: string;
-    phone: string;
-    password?: string;
+    phone?: string;
+    password: string;
     dusun: string;
     rt: string;
     rw: string;
     address: string;
+    religion?: string;
+    maritalStatus?: string;
   }) => Promise<UserProfile>;
   updateProfile: (updated: Partial<UserProfile>) => Promise<void>;
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Official account directory by NIK and Email
-const OFFICIAL_ACCOUNTS: Record<string, UserProfile> = {
-  // Warga Demo: Asep Saepudin
-  '3204121503920001': {
-    id: 'user-warga-1',
-    email: 'warga.asep@desa-bojongloa.id',
-    fullName: 'Asep Saepudin',
-    role: 'warga',
-    nik: '3204121503920001',
-    phone: '081234567890',
-    address: 'Jl. Desa Bojongloa No. 14, RT 02/RW 03',
-    rt: '02',
-    rw: '03',
-    dusun: 'Dusun Babakan',
-    gender: 'L',
-    birthPlace: 'Bandung',
-    birthDate: '1992-03-15',
-    occupation: 'Wiraswasta',
-    password: 'password123',
-    createdAt: '2025-01-10T08:00:00Z',
-    updatedAt: '2025-01-10T08:00:00Z'
-  },
-  // Admin Demo: Kasi Pelayanan Desa
-  '3204121208840001': {
-    id: 'user-admin-1',
-    email: 'admin@desa-bojongloa.id',
-    fullName: DESA_INFO.namaKasiPelayanan,
-    role: 'admin',
-    nik: '3204121208840001',
-    phone: '081122334455',
-    address: 'Kantor Desa Bojongloa, Rancaekek',
-    rt: '01',
-    rw: '01',
-    dusun: 'Dusun Bojongloa Pusat',
-    gender: 'L',
-    birthPlace: 'Bandung',
-    birthDate: '1984-08-12',
-    occupation: 'Kasi Pelayanan Desa',
-    password: 'password123',
-    createdAt: '2025-01-01T08:00:00Z',
-    updatedAt: '2025-01-01T08:00:00Z'
-  },
-  // Kades Demo: Kepala Desa
-  '3204121405710001': {
-    id: 'user-kades-1',
-    email: 'kades@desa-bojongloa.id',
-    fullName: DESA_INFO.namaKades,
-    role: 'kades',
-    nik: '3204121405710001',
-    phone: '081298765432',
-    address: 'Jl. Raya Bojongloa No. 1, Rancaekek',
-    rt: '01',
-    rw: '01',
-    dusun: 'Dusun Bojongloa Pusat',
-    gender: 'L',
-    birthPlace: 'Bandung',
-    birthDate: '1971-05-14',
-    occupation: 'Kepala Desa',
-    password: 'password123',
-    createdAt: '2025-01-01T08:00:00Z',
-    updatedAt: '2025-01-01T08:00:00Z'
-  }
-};
+/**
+ * Map a row from the `users` table to the UserProfile TypeScript type.
+ */
+export const mapDbUserToProfile = (row: any): UserProfile => ({
+  id: row.id,
+  email: row.email || '',
+  fullName: row.full_name || '',
+  role: (row.role as UserRole) || 'warga',
+  nik: row.nik || undefined,
+  noKk: row.no_kk || undefined,
+  phone: row.phone || undefined,
+  address: row.address || undefined,
+  rt: row.rt || undefined,
+  rw: row.rw || undefined,
+  dusun: row.dusun || undefined,
+  gender: row.gender || undefined,
+  birthPlace: row.birth_place || undefined,
+  birthDate: row.birth_date || undefined,
+  occupation: row.occupation || undefined,
+  religion: row.religion || undefined,
+  maritalStatus: row.marital_status || undefined,
+  createdAt: row.created_at || new Date().toISOString(),
+  updatedAt: row.updated_at || new Date().toISOString()
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
+  let isMounted = false;
 
+  /** Fetch a fresh profile from the `users` table by auth user ID. */
+  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.warn('Gagal memuat profil pengguna dari Supabase:', error.message);
+        return null;
+      }
+      return data ? mapDbUserToProfile(data) : null;
+    } catch (err) {
+      console.warn('Error saat mengambil profil:', err);
+      return null;
+    }
+  };
+
+  // Initialize auth session and profile on app mount
   useEffect(() => {
-    // Check local/session storage for logged-in user
-    const storedUser = localStorage.getItem('desa_current_user') || sessionStorage.getItem('desa_current_user');
-    if (storedUser) {
-      try {
-        const parsed = JSON.parse(storedUser);
-        setProfile(parsed);
-        setRole(parsed.role);
-      } catch {
+    isMounted = true;
+
+    const initialize = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!isMounted) return;
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        const fetched = await fetchProfile(session.user.id);
+        if (isMounted) {
+          setProfile(fetched ?? null);
+          setRole(fetched?.role ?? null);
+          setLoading(false);
+        }
+      } else {
+        setSupabaseUser(null);
         setProfile(null);
         setRole(null);
+        setLoading(false);
       }
-    }
+    };
 
-    // Seed initial collections lazily in background only after initial paint
-    const timer = setTimeout(() => {
-      ArchiveService.seedInitialDataIfNeeded();
-    }, 1200);
+    initialize();
 
-    setLoading(false);
+    // Subscribe to auth state changes (login, logout, token refresh)
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!isMounted) return;
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        const fetched = await fetchProfile(session.user.id);
+        if (isMounted) {
+          setProfile(fetched ?? null);
+          setRole(fetched?.role ?? null);
+          setLoading(false);
+        }
+      } else {
+        setSupabaseUser(null);
+        setProfile(null);
+        setRole(null);
+        setLoading(false);
+      }
+    });
 
     return () => {
-      clearTimeout(timer);
+      isMounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
-  // Login strictly via NIK and Password
-  const loginWithNik = async (nikOrIdentifier: string, passwordInput?: string): Promise<UserProfile> => {
-    const cleanNik = nikOrIdentifier.trim();
-    const cleanPassword = (passwordInput || '').trim();
+  /**
+   * Log in with NIK or email and password.
+   * Auth is handled entirely by Supabase Auth; we then fetch the public profile.
+   */
+  const loginWithNik = async (nikOrIdentifier: string, password: string): Promise<UserProfile> => {
+    const identifier = nikOrIdentifier.trim();
+    const passwordTrim = password.trim();
 
-    if (!cleanNik) {
-      throw new Error('Nomor Induk Kependudukan (NIK) wajib diisi.');
+    if (!identifier) {
+      throw new Error('Nomor Induk Kependudukan (NIK) atau Email wajib diisi.');
     }
-    if (!cleanPassword) {
+    if (!passwordTrim) {
       throw new Error('Kata sandi wajib diisi.');
     }
 
-    // Check local registered cache first (from localStorage and sessionStorage)
-    let localRegisteredList: UserProfile[] = [];
-    try {
-      const stored = localStorage.getItem('desa_registered_users') || sessionStorage.getItem('desa_registered_users');
-      if (stored) localRegisteredList = JSON.parse(stored);
-    } catch {
-      // ignore
-    }
+    let email = identifier;
+    // Check if identifier looks like an email (simple heuristic: contains '@' and a dot after '@')
+    const isEmail = identifier.includes('@') && identifier.split('@')[1].includes('.');
+    if (!isEmail) {
+      // Treat as NIK: look up email from the users table
+      const { data, error } = await (supabaseServiceRole ?? supabase)
+        .from('users')
+        .select('email')
+        .eq('nik', identifier)
+        .single();
 
-    // 1. Check locally registered users by NIK
-    const locallyRegistered = localRegisteredList.find((u) => u.nik === cleanNik);
-    if (locallyRegistered) {
-      if (locallyRegistered.password && cleanPassword !== locallyRegistered.password) {
-        throw new Error('Kata sandi salah. Silakan periksa kembali kata sandi akun Anda.');
-      }
-      setProfile(locallyRegistered);
-      setRole(locallyRegistered.role);
-      localStorage.setItem('desa_current_user', JSON.stringify(locallyRegistered));
-      sessionStorage.setItem('desa_current_user', JSON.stringify(locallyRegistered));
-      return locallyRegistered;
-    }
-
-    // 2. Search database users from Supabase / archiveService
-    try {
-      const allUsers = await ArchiveService.getAllUsers();
-      const foundUser = allUsers.find(
-        (u) => (u.nik && u.nik === cleanNik) || u.email.toLowerCase() === cleanNik.toLowerCase()
-      );
-
-      if (foundUser) {
-        if (foundUser.password && cleanPassword !== foundUser.password) {
-          throw new Error('Kata sandi salah. Silakan periksa kembali kata sandi akun Anda.');
+      if (error) {
+        if (error.code === 'PGRST116') { // No rows returned
+          throw new Error('NIK tidak ditemukan');
+        } else {
+          throw error;
         }
-        setProfile(foundUser);
-        setRole(foundUser.role);
-        localStorage.setItem('desa_current_user', JSON.stringify(foundUser));
-        sessionStorage.setItem('desa_current_user', JSON.stringify(foundUser));
-        return foundUser;
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('Kata sandi salah')) {
-        throw err;
+      if (!data || !data.email) {
+        throw new Error('Email tidak ditemukan untuk NIK ini');
       }
+      email = data.email;
     }
 
-    // 3. Fallback check official accounts by NIK
-    if (OFFICIAL_ACCOUNTS[cleanNik]) {
-      const acc = OFFICIAL_ACCOUNTS[cleanNik];
-      if (acc.password && cleanPassword !== acc.password) {
-        throw new Error('Kata sandi salah. Silakan periksa kembali kata sandi akun Anda.');
+    const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password: passwordTrim
+    });
+
+    if (signInError) {
+      const errMsg = signInError.message.toLowerCase();
+      if (errMsg.includes('email not confirmed')) {
+        throw new Error('Email akun belum terkonfirmasi. Silakan verifikasi email Anda melalui link yang dikirim oleh Supabase.');
       }
-      setProfile(acc);
-      setRole(acc.role);
-      localStorage.setItem('desa_current_user', JSON.stringify(acc));
-      sessionStorage.setItem('desa_current_user', JSON.stringify(acc));
-      return acc;
+      if (errMsg.includes('invalid login credentials')) {
+        throw new Error('NIK/Email atau kata sandi tidak cocok. Pastikan akun sudah terdaftar dan kata sandi benar.');
+      }
+      throw new Error(`Gagal masuk: ${signInError.message}`);
     }
 
-    // 4. Search Master Residents if citizen already in population database
-    try {
-      const allResidents = await ArchiveService.getResidents();
-      const residentMatch = allResidents.find((r) => r.nik === cleanNik);
-      if (residentMatch) {
-        const citizenUser: UserProfile = {
-          id: 'user-' + residentMatch.id,
-          email: `${residentMatch.nik}@desa-bojongloa.id`,
-          fullName: residentMatch.fullName,
-          role: 'warga',
-          nik: residentMatch.nik,
-          gender: residentMatch.gender,
-          birthPlace: residentMatch.birthPlace,
-          birthDate: residentMatch.birthDate,
-          occupation: residentMatch.occupation,
-          dusun: residentMatch.dusun,
-          rt: residentMatch.rt,
-          rw: residentMatch.rw,
-          address: residentMatch.address,
-          password: cleanPassword,
-          createdAt: residentMatch.createdAt,
-          updatedAt: new Date().toISOString()
-        };
-        try {
-          await ArchiveService.saveUserProfile(citizenUser);
-        } catch {
-          // continue with local profile
-        }
-        setProfile(citizenUser);
-        setRole('warga');
-        sessionStorage.setItem('desa_current_user', JSON.stringify(citizenUser));
-        return citizenUser;
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('Kata sandi salah')) {
-        throw err;
-      }
+    if (!authData.user) {
+      throw new Error('Autentikasi gagal: tidak ada data pengguna yang dikembalikan.');
     }
 
-    throw new Error('Nomor NIK belum terdaftar di sistem. Silakan klik tab "Daftar Warga Baru" untuk mendaftar akun.');
+    // Load profile from the public `users` table
+    const userProfile = await fetchProfile(authData.user.id);
+    if (!userProfile) {
+      // Fallback: create a minimal profile while waiting for trigger/db sync
+      const fallback: UserProfile = {
+        id: authData.user.id,
+        email: authData.user.email || email,
+        fullName: authData.user.user_metadata?.full_name || '',
+        role: 'warga',
+        nik: isEmail ? undefined : identifier,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      // Optionally set the fallback in state so UI shows something immediately
+      setProfile(fallback);
+      setRole('warga');
+      return fallback;
+    }
+
+    return userProfile;
   };
 
+  /**
+   * Register a new resident.
+   * Steps:
+   *   1. Validate NIK (16 digits), password (min 6 chars), and email (required, contains '@').
+   *   2. Create auth account with email = `${inputEmail}`.
+   *   3. Wait briefly for the `on_auth_user_created` trigger to create a row in `users`.
+   *   4. Fetch that user profile.
+   *   5. Upsert a row into `residents` with the submitted biodata.
+   *   6. Return the user profile (from `users`).
+   */
   const register = async (userData: {
     fullName: string;
     nik: string;
     gender: 'L' | 'P';
     email: string;
-    phone: string;
-    password?: string;
+    phone?: string;
+    password: string;
     dusun: string;
     rt: string;
     rw: string;
     address: string;
+    religion?: string;
+    maritalStatus?: string;
   }): Promise<UserProfile> => {
-    const now = new Date().toISOString();
-    const newCitizenProfile: UserProfile = {
-      id: 'warga-' + userData.nik,
-      fullName: userData.fullName,
-      nik: userData.nik,
-      gender: userData.gender,
-      email: userData.email,
-      phone: userData.phone,
-      password: userData.password || 'password123',
-      dusun: userData.dusun,
-      rt: userData.rt,
-      rw: userData.rw,
-      address: userData.address,
-      role: 'warga',
-      createdAt: now,
-      updatedAt: now
-    };
+    const { fullName, nik, gender, email, phone, password, dusun, rt, rw, address, religion, maritalStatus } = userData;
 
-    try {
-      const stored = localStorage.getItem('desa_registered_users') || sessionStorage.getItem('desa_registered_users');
-      const list: UserProfile[] = stored ? JSON.parse(stored) : [];
-      const filtered = list.filter((u) => u.nik !== newCitizenProfile.nik);
-      filtered.push(newCitizenProfile);
-      localStorage.setItem('desa_registered_users', JSON.stringify(filtered));
-      sessionStorage.setItem('desa_registered_users', JSON.stringify(filtered));
-    } catch {
-      // ignore
+    const cleanNik = nik.trim();
+    const cleanEmail = email.trim();
+    const cleanPassword = password.trim();
+
+    // ---- Validation ----
+    if (cleanNik.length !== 16 || !/^\d{16}$/.test(cleanNik)) {
+      throw new Error('Nomor NIK harus tepat 16 digit angka sesuai KTP.');
+    }
+    if (cleanPassword.length < 6) {
+      throw new Error('Kata sandi minimal 6 karakter.');
+    }
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Email harus diisi dan berformat valid (contoh: nama@domain.com).');
     }
 
-    setProfile(newCitizenProfile);
-    setRole('warga');
-    localStorage.setItem('desa_current_user', JSON.stringify(newCitizenProfile));
-    sessionStorage.setItem('desa_current_user', JSON.stringify(newCitizenProfile));
+    // ---- Check if NIK already exists in residents table ----
+    const { data: existingResident, error: residentCheckError } = await supabase
+      .from('residents')
+      .select('nik')
+      .eq('nik', cleanNik)
+      .single();
 
-    try {
-      await ArchiveService.saveUserProfile(newCitizenProfile);
-    } catch (err) {
-      console.warn('Sync to database skipped:', err);
+    if (residentCheckError && residentCheckError.code !== 'PGRST116') {
+      // PGRST116 means no rows returned (not an error we care about)
+      console.warn('Error checking NIK uniqueness:', residentCheckError);
+    }
+    if (existingResident) {
+      throw new Error('NIK ini sudah terdaftar di sistem. Silakan langsung masuk menggunakan kata sandi Anda.');
     }
 
-    return newCitizenProfile;
+    // ---- Step 2: Create auth account with INPUT EMAIL ----
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({
+      email: cleanEmail, // <-- use email from form
+      password: cleanPassword,
+      options: {
+        data: {
+          nik: cleanNik,
+          fullName: fullName.trim(),
+          phone: phone?.trim() ?? '',
+          address: address?.trim() ?? '',
+          gender,
+          dusun,
+          rt,
+          rw,
+          religion: religion ?? undefined,
+          maritalStatus: maritalStatus ?? undefined
+        }
+      }
+    });
+
+    if (signUpError) {
+      const errMsg = signUpError.message.toLowerCase();
+      if (errMsg.includes('already registered')) {
+        throw new Error('Email yang Anda masukkan sudah terdaftar. Silakan langsung masuk menggunakan email dan kata sandi Anda.');
+      }
+      throw new Error(`Gagal mendaftar: ${signUpError.message}`);
+    }
+
+    if (!authData.user) {
+      throw new Error('Pendaftaran selesai, namun akun pengguna belum dapat diinisialisasi.');
+    }
+
+    const uid = authData.user.id;
+
+    // ---- Step 3: Wait briefly for trigger to populate `users` table ----
+    await new Promise(res => setTimeout(res, 500));
+
+    // ---- Step 4: Fetch the user profile from `users` ----
+    let userProfile = await fetchProfile(uid);
+    if (!userProfile) {
+      // Fallback minimal profile (should rarely happen)
+      userProfile = {
+        id: uid,
+        email: authData.user.email || cleanEmail,
+        fullName: fullName.trim(),
+        role: 'warga',
+        nik: cleanNik,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      // Set temporary state so UI doesn't show empty
+      setProfile(userProfile);
+      setRole('warga');
+    }
+
+    // ---- Step 5: Upsert biodata into `residents` table (create if not exists, update if exists) ----
+    try {
+      await supabase.from('residents').upsert([
+        {
+          nik: cleanNik,
+          full_name: fullName.trim(),
+          gender,
+          phone: phone?.trim() ?? null,
+          address: address?.trim() ?? null,
+          dusun,
+          rt: rt ?? '01',
+          rw: rw ?? '01',
+          // Fields we may not have during registration – leave as NULL
+          birth_place: null,
+          birth_date: null,
+          occupation: null,
+          // Note: email column not inserted here; add column to residents table if needed
+          status: 'aktif',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ], { onConflict: 'nik' });
+    } catch (residentError) {
+      // If upserting into residents fails, we still have an auth account and a user profile.
+      // Log the error but do not fail the registration – the resident row can be added later.
+      console.warn('Gagal menyimpan atau memperbarui biodata ke tabel residents:', residentError);
+    }
+
+    // Ensure we have the latest profile (in case the trigger updated something)
+    userProfile = await fetchProfile(uid) ?? userProfile;
+    if (isMounted) {
+      setProfile(userProfile);
+      setRole(userProfile.role);
+    }
+    return userProfile;
   };
 
+  /**
+   * Update the logged‑in user's profile (fields allowed by the UI).
+   */
   const updateProfile = async (updated: Partial<UserProfile>) => {
     if (!profile) return;
-    const newProf: UserProfile = {
-      ...profile,
-      ...updated,
-      updatedAt: new Date().toISOString()
-    };
-    setProfile(newProf);
-    if (newProf.role) {
-      setRole(newProf.role);
+
+    const dbPayload: Record<string, any> = {};
+    if (updated.fullName !== undefined) dbPayload.full_name = updated.fullName;
+    if (updated.phone !== undefined) dbPayload.phone = updated.phone;
+    if (updated.address !== undefined) dbPayload.address = updated.address;
+    if (updated.rt !== undefined) dbPayload.rt = updated.rt;
+    if (updated.rw !== undefined) dbPayload.rw = updated.rw;
+    if (updated.dusun !== undefined) dbPayload.dusun = updated.dusun;
+    if (updated.gender !== undefined) dbPayload.gender = updated.gender;
+    if (updated.birthPlace !== undefined) dbPayload.birth_place = updated.birthPlace;
+    if (updated.birthDate !== undefined) dbPayload.birth_date = updated.birthDate;
+    if (updated.occupation !== undefined) dbPayload.occupation = updated.occupation;
+    if (updated.noKk !== undefined) dbPayload.no_kk = updated.noKk;
+    if (updated.religion !== undefined) dbPayload.religion = updated.religion;
+    if (updated.maritalStatus !== undefined) dbPayload.maritalStatus = updated.maritalStatus;
+
+    const { error } = await supabase
+      .from('users')
+      .update(dbPayload)
+      .eq('id', profile.id);
+
+    if (error) {
+      throw new Error(`Gagal memperbarui profil: ${error.message}`);
     }
-    sessionStorage.setItem('desa_current_user', JSON.stringify(newProf));
-    try {
-      await ArchiveService.saveUserProfile(newProf);
-    } catch (err) {
-      console.warn('Could not persist profile to server:', err);
+
+    // Refresh profile from DB
+    const refreshed = await fetchProfile(profile.id);
+    if (refreshed) {
+      setProfile(refreshed);
     }
   };
 
+  /** Log out the user and clear auth/session state. */
   const logout = async () => {
-    localStorage.removeItem('desa_current_user');
-    sessionStorage.removeItem('desa_current_user');
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Notice saat logout:', err);
+    }
+    setSupabaseUser(null);
     setProfile(null);
     setRole(null);
   };
@@ -318,7 +414,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider
       value={{
-        firebaseUser: null,
+        supabaseUser,
         profile,
         role,
         loading,

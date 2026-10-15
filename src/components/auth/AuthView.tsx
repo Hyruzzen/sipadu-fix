@@ -41,7 +41,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Login form states
-  const [loginNik, setLoginNik] = useState('');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
   // Register form states
@@ -64,14 +64,9 @@ export const AuthView: React.FC<AuthViewProps> = ({
     setLoading(true);
     setErrorMessage(null);
 
-    const cleanNik = loginNik.trim();
-    if (!cleanNik) {
-      setErrorMessage('Nomor Induk Kependudukan (NIK) wajib diisi.');
-      setLoading(false);
-      return;
-    }
-    if (cleanNik.length !== 16 || !/^\d+$/.test(cleanNik)) {
-      setErrorMessage('Nomor NIK harus tepat 16 digit angka sesuai KTP.');
+    const cleanIdentifier = loginIdentifier.trim();
+    if (!cleanIdentifier) {
+      setErrorMessage('Nomor Induk Kependudukan (NIK) atau Email wajib diisi.');
       setLoading(false);
       return;
     }
@@ -82,7 +77,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
     }
 
     try {
-      const loggedProfile = await loginWithNik(cleanNik, loginPassword);
+      const loggedProfile = await loginWithNik(cleanIdentifier, loginPassword);
       setSuccessMessage(
         `Berhasil masuk! Selamat datang, ${loggedProfile.fullName} (${loggedProfile.role.toUpperCase()}).`
       );
@@ -90,9 +85,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         if (onSuccess) onSuccess();
       }, 600);
     } catch (err: any) {
-      setErrorMessage(
-        err.message || 'Gagal masuk. Pastikan NIK dan kata sandi Anda sudah benar.'
-      );
+      setErrorMessage(err.message || 'Gagal masuk. Pastikan NIK/Email dan kata sandi Anda sudah benar.');
     } finally {
       setLoading(false);
     }
@@ -234,22 +227,21 @@ export const AuthView: React.FC<AuthViewProps> = ({
             <form onSubmit={handleLoginSubmit} className="space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-stone-700 mb-1.5">
-                  Nomor Induk Kependudukan (NIK) <span className="text-red-500">*</span>
+                  NIK atau Email <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <CreditCard className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" />
                   <input
                     type="text"
                     required
-                    maxLength={16}
-                    placeholder="Masukkan 16 digit NIK Anda (contoh: 320412...)"
-                    value={loginNik}
-                    onChange={(e) => setLoginNik(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Masukkan NIK atau email Anda"
+                    value={loginIdentifier}
+                    onChange={(e) => setLoginIdentifier(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 border border-stone-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-hidden"
                   />
                 </div>
                 <p className="text-[11px] text-stone-400 mt-1">
-                  Gunakan 16 digit NIK yang tercantum pada KTP-el atau Kartu Keluarga Anda.
+                  Masukkan NIK (16 digit) atau email yang terdaftar pada sistem.
                 </p>
               </div>
 

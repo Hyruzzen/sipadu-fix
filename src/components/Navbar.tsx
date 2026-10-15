@@ -241,15 +241,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
-          <div className="lg:hidden py-4 border-t border-stone-200 space-y-3">
-            <div className="flex gap-2 p-1 bg-stone-100 rounded-xl">
+          <div className="lg:hidden py-4 border-t border-emerald-200 space-y-3">
+            <div className="flex gap-2 p-1 bg-emerald-50 rounded-xl">
               <button
                 onClick={() => {
                   setViewMode('landing');
                   setMobileMenuOpen(false);
                 }}
                 className={`flex-1 py-2 text-xs font-bold rounded-lg ${
-                  viewMode === 'landing' ? 'bg-white shadow-xs text-stone-900' : 'text-stone-600'
+                  viewMode === 'landing' ? 'bg-emerald-200 shadow-xs text-emerald-900' : 'text-emerald-400 hover:bg-emerald-100'
                 }`}
               >
                 Portal Berita Desa
@@ -260,7 +260,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setMobileMenuOpen(false);
                 }}
                 className={`flex-1 py-2 text-xs font-bold rounded-lg ${
-                  viewMode === 'portal' ? 'bg-white shadow-xs text-stone-900' : 'text-stone-600'
+                  viewMode === 'portal' ? 'bg-emerald-200 shadow-xs text-emerald-900' : 'text-emerald-400 hover:bg-emerald-100'
                 }`}
               >
                 Layanan Arsip
@@ -269,7 +269,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {viewMode === 'portal' && profile && (
               <div className="space-y-1 pt-2">
-                <div className="text-[11px] font-bold text-stone-400 px-3 uppercase">
+                <div className="text-[11px] font-bold text-emerald-400 px-3 uppercase">
                   Menu Panel {currentRoleBadge?.label}
                 </div>
                 {portalTabs.map((tab) => {
@@ -283,7 +283,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setMobileMenuOpen(false);
                       }}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold ${
-                        isActive ? 'bg-emerald-600 text-white' : 'text-stone-700 hover:bg-stone-100'
+                        isActive ? 'bg-emerald-600 text-white' : 'text-emerald-400 hover:bg-emerald-100 hover:text-emerald-800'
                       }`}
                     >
                       <Icon className="w-4 h-4" />

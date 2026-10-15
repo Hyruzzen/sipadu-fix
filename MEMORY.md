@@ -1,0 +1,2 @@
+- [RTK - Rust Token Killer](RTK.md) — Reference for token-optimized CLI proxy usage
+- [Fix NIK login failure with service role key](fix-nik-login.md) — Modified auth system to use service role key for NIK lookup to bypass RLS

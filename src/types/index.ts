@@ -16,7 +16,8 @@ export interface UserProfile {
   birthPlace?: string;
   birthDate?: string;
   occupation?: string;
-  password?: string;
+  religion?: string;
+  maritalStatus?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface AttachmentFile {
   type: string;
   url: string;
   size?: number;
+  storagePath?: string;
 }
 
 export interface KelahiranDetails {

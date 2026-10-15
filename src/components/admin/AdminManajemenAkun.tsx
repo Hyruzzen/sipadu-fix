@@ -12,129 +12,78 @@ import {
   CheckCircle,
   AlertCircle,
   X,
-  Eye,
-  EyeOff
+  Info
 } from 'lucide-react';
-import { DESA_INFO } from '../../data/mockData';
 
 export const AdminManajemenAkun: React.FC = () => {
   const { profile: currentAdmin } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
-  // Form state for creating user / staff with Password
-  const [newStaff, setNewStaff] = useState({
-    fullName: '',
-    email: '',
-    role: 'admin' as UserRole,
-    nik: '',
-    phone: '',
-    address: 'Kantor Desa Bojongloa',
-    password: '',
-    confirmPassword: ''
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [nikError, setNikError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
+  // Form state for role promotion / staff assignment
+  const [promoteUserId, setPromoteUserId] = useState('');
+  const [selectedNewRole, setSelectedNewRole] = useState<UserRole>('admin');
 
   const loadUsers = async () => {
-    const list = await ArchiveService.getAllUsers();
-    // Exclude mock demo accounts
-    const cleaned = list.filter((u) => !u.id.startsWith('demo-warga-'));
-    setUsers(cleaned);
+    setLoading(true);
+    try {
+      const list = await ArchiveService.getAllUsers();
+      // Exclude mock demo accounts
+      const cleaned = list.filter((u) => !u.id.startsWith('demo-warga-'));
+      setUsers(cleaned);
+    } catch (err) {
+      console.error('Gagal memuat pengguna:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadUsers();
   }, []);
 
-  const handleOpenAdd = () => {
-    setNewStaff({
-      fullName: '',
-      email: '',
-      role: 'admin',
-      nik: '',
-      phone: '',
-      address: 'Kantor Desa Bojongloa',
-      password: '',
-      confirmPassword: ''
-    });
-    setShowPassword(false);
-    setShowConfirmPassword(false);
-    setNikError('');
-    setPasswordError('');
-    setAddModalOpen(true);
+  const handleUpdateRole = async (userId: string, newRole: UserRole, userName: string) => {
+    try {
+      await ArchiveService.updateUserRole(userId, newRole);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+      );
+      setNotification(`Hak akses akun ${userName} berhasil diubah menjadi ${newRole.toUpperCase()}!`);
+      setTimeout(() => setNotification(null), 3500);
+    } catch (err: any) {
+      alert(`Gagal memperbarui peran akun: ${err.message}`);
+    }
   };
 
-  const handleCreateStaff = async (e: React.FormEvent) => {
+  const handlePromoteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setNikError('');
-    setPasswordError('');
-
-    const cleanNik = newStaff.nik.trim();
-    if (!cleanNik) {
-      setNikError('NIK wajib diisi!');
+    if (!promoteUserId) {
+      alert('Silakan pilih akun pengguna yang ingin diatur perannya.');
       return;
     }
 
-    if (cleanNik.length !== 16 || !/^\d{16}$/.test(cleanNik)) {
-      setNikError('NIK wajib terdiri dari tepat 16 digit angka sesuai KTP/KK!');
-      return;
-    }
+    const targetUser = users.find((u) => u.id === promoteUserId);
+    if (!targetUser) return;
 
-    // Check duplicate NIK among existing users
-    if (users.some((u) => u.nik === cleanNik)) {
-      setNikError('NIK ini sudah digunakan oleh akun lain!');
-      return;
-    }
-
-    const cleanPassword = newStaff.password.trim();
-    if (!cleanPassword) {
-      setPasswordError('Kata sandi wajib diisi untuk login akun!');
-      return;
-    }
-
-    if (cleanPassword.length < 6) {
-      setPasswordError('Kata sandi minimal 6 karakter!');
-      return;
-    }
-
-    if (cleanPassword !== newStaff.confirmPassword.trim()) {
-      setPasswordError('Konfirmasi kata sandi tidak cocok. Silakan periksa kembali!');
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const newUser: UserProfile = {
-      id: 'usr-' + Date.now(),
-      email: newStaff.email.trim(),
-      fullName: newStaff.fullName.trim(),
-      role: newStaff.role,
-      nik: cleanNik,
-      phone: newStaff.phone.trim(),
-      address: newStaff.address.trim(),
-      password: cleanPassword,
-      createdAt: now,
-      updatedAt: now
-    };
-
-    await ArchiveService.saveUserProfile(newUser);
-    setUsers((prev) => [...prev, newUser]);
+    await handleUpdateRole(targetUser.id, selectedNewRole, targetUser.fullName);
     setAddModalOpen(false);
-    setNotification(`Akun ${newUser.fullName} (${newUser.role.toUpperCase()}) berhasil dibuat dengan NIK ${newUser.nik}!`);
-    setTimeout(() => setNotification(null), 3000);
+    setPromoteUserId('');
   };
 
   const handleDeleteUser = async (userId: string, userName: string) => {
-    if (!window.confirm(`Yakin ingin menghapus akun ${userName} dari sistem?`)) return;
-    await ArchiveService.deleteUser(userId);
-    setUsers(users.filter((u) => u.id !== userId));
-    setNotification(`Akun ${userName} berhasil dihapus dari sistem!`);
-    setTimeout(() => setNotification(null), 2500);
+    if (!window.confirm(`Yakin ingin menghapus akun ${userName} dari profil kependudukan?`)) return;
+    try {
+      await ArchiveService.deleteUser(userId);
+      setUsers(users.filter((u) => u.id !== userId));
+      setNotification(`Akun ${userName} berhasil dihapus dari sistem!`);
+      setTimeout(() => setNotification(null), 3000);
+    } catch (err: any) {
+      alert(`Gagal menghapus akun: ${err.message}`);
+    }
   };
 
   const filteredUsers = users.filter((u) => {
@@ -154,16 +103,20 @@ export const AdminManajemenAkun: React.FC = () => {
             Manajemen Akun & Hak Akses Pengguna
           </h1>
           <p className="text-xs sm:text-sm text-stone-500">
-            Daftar akun pengguna sistem Desa Bojongloa. Hak akses role ditentukan saat akun dibuat.
+            Daftar pengguna terautentikasi sistem Desa Bojongloa. Kelola peran akses secara aman sesuai otoritas.
           </p>
         </div>
 
         <button
-          onClick={handleOpenAdd}
+          onClick={() => {
+            setPromoteUserId('');
+            setSelectedNewRole('admin');
+            setAddModalOpen(true);
+          }}
           className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors shrink-0"
         >
           <Plus className="w-4 h-4" />
-          <span>Tambah Akun Pengguna</span>
+          <span>Atur Peran Staf / Admin</span>
         </button>
       </div>
 
@@ -211,20 +164,17 @@ export const AdminManajemenAkun: React.FC = () => {
 
       {/* Users Table */}
       <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
-        {filteredUsers.length === 0 ? (
+        {loading ? (
+          <div className="p-12 text-center text-stone-400 text-xs">
+            Memuat data pengguna dari database aman Supabase...
+          </div>
+        ) : filteredUsers.length === 0 ? (
           <div className="p-12 text-center text-stone-500">
             <User className="w-12 h-12 text-stone-300 mx-auto mb-2" />
             <p className="text-sm font-semibold text-stone-800">Tidak ada akun ditemukan</p>
             <p className="text-xs text-stone-400 mt-1 mb-4">
-              Silakan tambahkan akun pengguna baru dengan NIK wajib 16 digit.
+              Warga dapat mendaftar mandiri melalui halaman Registrasi NIK.
             </p>
-            <button
-              onClick={handleOpenAdd}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Tambah Akun Baru</span>
-            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -234,7 +184,7 @@ export const AdminManajemenAkun: React.FC = () => {
                   <th className="p-3.5">Nama Pengguna</th>
                   <th className="p-3.5">NIK Kependudukan</th>
                   <th className="p-3.5">Email & Kontak</th>
-                  <th className="p-3.5">Role Sistem</th>
+                  <th className="p-3.5">Hak Akses (Role)</th>
                   <th className="p-3.5 text-right">Tindakan</th>
                 </tr>
               </thead>
@@ -245,7 +195,9 @@ export const AdminManajemenAkun: React.FC = () => {
                     <tr key={u.id} className="hover:bg-stone-50/70 transition-colors">
                       <td className="p-3.5">
                         <div className="font-bold text-stone-900">{u.fullName}</div>
-                        <div className="text-[10px] text-stone-400 font-mono">UID: {u.id}</div>
+                        <div className="text-[10px] text-stone-400 font-mono truncate max-w-xs">
+                          UID: {u.id}
+                        </div>
                       </td>
                       <td className="p-3.5">
                         <span className="font-mono font-bold text-stone-800 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
@@ -257,28 +209,40 @@ export const AdminManajemenAkun: React.FC = () => {
                         <div className="text-[11px] text-stone-400">{u.phone || '-'}</div>
                       </td>
                       <td className="p-3.5">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                            u.role === 'admin'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : u.role === 'kades'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-blue-50 text-blue-700 border-blue-200'
-                          }`}
-                        >
-                          {u.role === 'admin' && <Shield className="w-3 h-3" />}
-                          {u.role === 'kades' && <Crown className="w-3 h-3" />}
-                          {u.role === 'warga' && <User className="w-3 h-3" />}
-                          <span className="capitalize">{u.role}</span>
-                        </span>
+                        {isCurrentUser ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-800 border-emerald-200">
+                            <Shield className="w-3 h-3" />
+                            <span>Admin (Akun Aktif)</span>
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={u.role}
+                              onChange={(e) =>
+                                handleUpdateRole(u.id, e.target.value as UserRole, u.fullName)
+                              }
+                              className={`text-[11px] font-bold rounded-lg px-2 py-1 border transition-colors cursor-pointer ${
+                                u.role === 'admin'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  : u.role === 'kades'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                  : 'bg-stone-50 text-stone-700 border-stone-300'
+                              }`}
+                            >
+                              <option value="warga">Warga</option>
+                              <option value="admin">Admin Desa</option>
+                              <option value="kades">Kepala Desa</option>
+                            </select>
+                          </div>
+                        )}
                       </td>
                       <td className="p-3.5 text-right">
                         {isCurrentUser ? (
-                          <span className="text-[11px] text-stone-400 italic">Akun Anda Sendiri</span>
+                          <span className="text-[11px] text-stone-400 italic">Sedang Digunakan</span>
                         ) : (
                           <button
                             onClick={() => handleDeleteUser(u.id, u.fullName)}
-                            title="Hapus akun dari sistem"
+                            title="Hapus profil dari database"
                             className="p-1.5 rounded-lg text-stone-400 hover:text-red-600 hover:bg-red-50 border border-stone-200 hover:border-red-200 transition-colors inline-flex items-center gap-1 text-[11px] font-semibold"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -295,17 +259,17 @@ export const AdminManajemenAkun: React.FC = () => {
         )}
       </div>
 
-      {/* ADD USER MODAL */}
+      {/* ROLE SETTING & STAFF ASSIGNMENT MODAL */}
       {addModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200 space-y-4 animate-in zoom-in-95">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="font-bold text-stone-900 text-base">
-                  Tambah Akun Pengguna Baru
+                  Penetapan Hak Akses Staf Desa
                 </h3>
                 <p className="text-xs text-stone-500">
-                  Peran akses (role) ditentukan saat pembuatan akun ini
+                  Tetapkan akun terdaftar menjadi Admin Desa atau Kepala Desa
                 </p>
               </div>
               <button
@@ -316,146 +280,48 @@ export const AdminManajemenAkun: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateStaff} className="space-y-3.5 text-xs">
-              {/* NIK Field - Mandatory */}
-              <div>
-                <label className="block font-semibold text-stone-700 mb-1">
-                  NIK Kependudukan (16 Digit) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={16}
-                  placeholder="Contoh: 3204121503920001"
-                  value={newStaff.nik}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 16);
-                    setNewStaff({ ...newStaff, nik: val });
-                    if (nikError) setNikError('');
-                  }}
-                  className={`w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:outline-hidden ${
-                    nikError ? 'border-red-400 focus:ring-red-400' : 'border-stone-300 focus:ring-emerald-500'
-                  }`}
-                />
-                {nikError ? (
-                  <p className="text-[11px] text-red-600 mt-1 font-medium">{nikError}</p>
-                ) : (
-                  <p className="text-[10px] text-stone-400 mt-0.5">Wajib tepat 16 digit angka sesuai KTP/KK</p>
-                )}
-              </div>
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex gap-2">
+              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                Kata sandi dikelola secara aman oleh <strong>Supabase Auth</strong> dan tidak disimpan di basis data publik. Pengguna dapat mendaftar mandiri dengan NIK terlebih dahulu, lalu Admin menetapkan hak aksesnya di sini.
+              </p>
+            </div>
 
+            <form onSubmit={handlePromoteSubmit} className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-stone-700 mb-1">
-                  Nama Lengkap <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Nama Lengkap Pengguna"
-                  value={newStaff.fullName}
-                  onChange={(e) => setNewStaff({ ...newStaff, fullName: e.target.value })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-stone-700 mb-1">
-                  Email <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="nama@email.com"
-                  value={newStaff.email}
-                  onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              {/* Role Selection at Creation - Non-editable afterwards */}
-              <div>
-                <label className="block font-semibold text-stone-700 mb-1">
-                  Peran Akses (Role) <span className="text-red-500">*</span>
+                  Pilih Pengguna Terdaftar <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={newStaff.role}
-                  onChange={(e) => setNewStaff({ ...newStaff, role: e.target.value as UserRole })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-800 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  required
+                  value={promoteUserId}
+                  onChange={(e) => setPromoteUserId(e.target.value)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-medium text-stone-800 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                 >
-                  <option value="admin">Administrator Desa (Pengelolaan Arsip & Verifikasi)</option>
-                  <option value="kades">Kepala Desa (Dashboard Eksekutif & Laporan)</option>
-                  <option value="warga">Warga Desa (Pengajuan Layanan Kependudukan Mandiri)</option>
+                  <option value="">-- Pilih Akun Berdasarkan Nama / NIK --</option>
+                  {users
+                    .filter((u) => u.id !== currentAdmin?.id)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} (NIK: {u.nik || '-'}) — Role Saat Ini: {u.role.toUpperCase()}
+                      </option>
+                    ))}
                 </select>
-                
               </div>
-
-              {/* Password Fields - Mandatory */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-stone-700 mb-1">
-                    Kata Sandi Akun <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      placeholder="Min. 6 karakter"
-                      value={newStaff.password}
-                      onChange={(e) => {
-                        setNewStaff({ ...newStaff, password: e.target.value });
-                        if (passwordError) setPasswordError('');
-                      }}
-                      className="w-full pl-3 pr-8 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-2.5 text-stone-400 hover:text-stone-700"
-                    >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-stone-700 mb-1">
-                    Konfirmasi Kata Sandi <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      required
-                      placeholder="Ulangi kata sandi"
-                      value={newStaff.confirmPassword}
-                      onChange={(e) => {
-                        setNewStaff({ ...newStaff, confirmPassword: e.target.value });
-                        if (passwordError) setPasswordError('');
-                      }}
-                      className="w-full pl-3 pr-8 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-2.5 top-2.5 text-stone-400 hover:text-stone-700"
-                    >
-                      {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              {passwordError && (
-                <p className="text-[11px] text-red-600 font-medium -mt-1">{passwordError}</p>
-              )}
 
               <div>
-                <label className="block font-semibold text-stone-700 mb-1">Nomor WhatsApp / HP</label>
-                <input
-                  type="text"
-                  placeholder="081234567890"
-                  value={newStaff.phone}
-                  onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value })}
-                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                />
+                <label className="block font-semibold text-stone-700 mb-1">
+                  Tugaskan Hak Akses Baru <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedNewRole}
+                  onChange={(e) => setSelectedNewRole(e.target.value as UserRole)}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-semibold text-stone-800 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                >
+                  <option value="admin">Administrator Desa (Kelola Arsip, Warga, dan Verifikasi)</option>
+                  <option value="kades">Kepala Desa (Dashboard Eksekutif & Laporan)</option>
+                  <option value="warga">Warga Biasa (Layanan Mandiri)</option>
+                </select>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">
@@ -470,7 +336,7 @@ export const AdminManajemenAkun: React.FC = () => {
                   type="submit"
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold shadow-xs transition-colors"
                 >
-                  Simpan & Daftarkan Akun
+                  Terapkan Peran Akun
                 </button>
               </div>
             </form>

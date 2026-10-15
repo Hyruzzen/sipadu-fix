@@ -25,9 +25,6 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Lampiran file list
-  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-
   // 1. Form state - Kelahiran
   const [kelahiran, setKelahiran] = useState({
     namaBayi: '',
@@ -52,7 +49,8 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
     tempatKematian: 'Kediaman di Desa Bojongloa',
     sebabKematian: 'Sakit Usia Lanjut',
     namaPelapor: profile?.fullName || '',
-    hubunganPelapor: 'Keluarga Kandung'
+    hubunganPelapor: 'Keluarga Kandung',
+    nikPelapor: profile?.nik || ''
   });
 
   // 3. Form state - Pindah Masuk
@@ -90,34 +88,41 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
     jenisKepindahan: 'Kepala Keluarga dan Seluruh Anggota'
   });
 
+  // Lampiran state
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const processFiles = (fileList: FileList | File[]) => {
     const filesArray = Array.from(fileList);
     if (filesArray.length === 0) return;
+    setUploadError(null);
 
-    filesArray.forEach((file) => {
-      if (file.size <= 4 * 1024 * 1024) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const dataUrl = ev.target?.result as string;
-          const newFile: AttachmentFile = {
-            name: file.name,
-            type: file.type || 'Dokumen Pendukung',
-            url: dataUrl || URL.createObjectURL(file),
-            size: file.size
-          };
-          setAttachments((prev) => [...prev, newFile]);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        const newFile: AttachmentFile = {
-          name: file.name,
-          type: file.type || 'Dokumen Pendukung',
-          url: URL.createObjectURL(file),
-          size: file.size
-        };
-        setAttachments((prev) => [...prev, newFile]);
+    const validFiles: File[] = [];
+    const newItems: AttachmentFile[] = [];
+
+    for (const file of filesArray) {
+      if (file.size > 5 * 1024 * 1024) {
+        setUploadError(`Berkas "${file.name}" melebihi batas ukuran maksimal 5 MB.`);
+        continue;
       }
-    });
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        setUploadError(`Format berkas "${file.name}" tidak didukung. Harap gunakan PDF atau Gambar (JPG, PNG, WEBP).`);
+        continue;
+      }
+
+      validFiles.push(file);
+      newItems.push({
+        name: file.name,
+        type: file.type || 'Dokumen Persyaratan',
+        url: URL.createObjectURL(file),
+        size: file.size
+      });
+    }
+
+    setPendingFiles((prev) => [...prev, ...validFiles]);
+    setAttachments((prev) => [...prev, ...newItems]);
   };
 
   const handleAddAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,11 +134,20 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
 
   const handleRemoveAttachment = (idx: number) => {
     setAttachments(attachments.filter((_, i) => i !== idx));
+    setPendingFiles(pendingFiles.filter((_, i) => i !== idx));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     if (submitting) return;
     setSubmitting(true);
+    setUploadError(null);
+
+    // Validate that we have a valid NIK before proceeding
+    if (!profile?.nik || !/^\d{16}$/.test(profile.nik)) {
+      setSubmitting(false);
+      setUploadError('NIK tidak valid atau tidak tersedia. Pastikan Anda telah login dengan NIK yang benar.');
+      return;
+    }
 
     let detailsPayload = {};
     let submissionTitle = '';
@@ -142,7 +156,7 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
       detailsPayload = kelahiran;
       submissionTitle = `Pencatatan Kelahiran - ${kelahiran.namaBayi || 'Bayi'}`;
     } else if (selectedType === 'kematian') {
-      detailsPayload = kematian;
+      detailsPayload = { ...kematian };
       submissionTitle = `Pencatatan Kematian - ${kematian.namaAlmarhum || 'Almarhum'}`;
     } else if (selectedType === 'pindah_masuk') {
       detailsPayload = pindahMasuk;
@@ -156,11 +170,36 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
     FORBIDDEN_DETAIL_KEYS.forEach((k) => delete cleanDetails[k]);
 
     if (!profile) {
+      setUploadError('Sesi login tidak valid. Silakan login kembali.');
       setSubmitting(false);
       return;
     }
 
     try {
+      const tempSubmissionId = `sub-${Date.now()}`;
+      const uploadedAttachments: AttachmentFile[] = [];
+
+      // Unggah berkas ke Supabase Storage secara aman
+      for (const file of pendingFiles) {
+        const uploaded = await ArchiveService.uploadAttachment(
+          file,
+          profile.id,
+          tempSubmissionId
+        );
+        uploadedAttachments.push(uploaded);
+      }
+
+      const finalAttachments =
+        uploadedAttachments.length > 0
+          ? uploadedAttachments
+          : [
+              {
+                name: 'Surat_Pengantar_RT_RW.pdf',
+                type: 'Berkas Persyaratan Kependudukan',
+                url: '#'
+              }
+            ];
+
       await ArchiveService.createSubmission({
         userId: profile.id,
         userEmail: profile.email,
@@ -171,27 +210,19 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
         status: 'menunggu',
         title: submissionTitle,
         details: JSON.stringify(cleanDetails),
-        attachments: JSON.stringify(
-          attachments.length > 0
-            ? attachments
-            : [{ name: 'Kartu_Keluarga.pdf', type: 'Kartu Keluarga', url: '#' }]
-        )
+        attachments: JSON.stringify(finalAttachments)
       });
 
       setSubmitting(false);
-      setSuccessMessage('Pencatatan kependudukan berhasil dikirim & tersimpan! Menuju riwayat pengajuan...');
+      setSuccessMessage('Pencatatan kependudukan berhasil dikirim & disimpan ke database! Menuju riwayat pengajuan...');
       setTimeout(() => {
         setSuccessMessage(null);
         onSuccess();
-      }, 600);
-    } catch (err) {
-      console.warn('Submission handled:', err);
+      }, 700);
+    } catch (err: any) {
+      console.error('Pengajuan gagal disimpan:', err);
       setSubmitting(false);
-      setSuccessMessage('Pencatatan kependudukan berhasil dicatat! Menuju riwayat pengajuan...');
-      setTimeout(() => {
-        setSuccessMessage(null);
-        onSuccess();
-      }, 600);
+      setUploadError(err.message || 'Gagal menyimpan pengajuan ke database.');
     }
   };
 
@@ -553,6 +584,19 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
                   className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">NIK Pelapor <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  maxLength={16}
+                  required
+                  placeholder="16 Digit NIK Pelapor"
+                  value={kematian.nikPelapor || ''}
+                  onChange={(e) => setKematian({ ...kematian, nikPelapor: e.target.value })}
+                  className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              </div>
             </div>
           </div>
         )}
@@ -821,18 +865,42 @@ export const PengajuanForm: React.FC<PengajuanFormProps> = ({ onSuccess }) => {
                   Keterangan berkas yang harus diunggah:
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-                    Kartu Keluarga (KK)
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-                    KTP Orang Tua
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-                    Surat Pengantar RT
-                  </span>
+                  {selectedType === 'kematian' && (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        Surat Pengantar RT
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        Kartu Keluarga (KK)
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        KTP Yang Meninggal
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        KTP Pelapor
+                      </span>
+                    </>
+                  )}
+                  {(selectedType === 'pindah_masuk' || selectedType === 'pindah_keluar') && (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        Surat Pengantar RT
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        Kartu Keluarga (KK)
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-stone-800 text-xs font-semibold shadow-2xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        KTP Pemohon
+                      </span>
+                    </>
+                  )}
                 </div>
                 <p className="text-[11px] text-emerald-900 leading-relaxed">
                   *Anda dapat memilih dan mengunggah langsung banyak dokumen sekaligus dalam sekali pilih.

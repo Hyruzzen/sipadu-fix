@@ -20,9 +20,11 @@ import {
   ShieldCheck,
   Building,
   Check,
-  XCircle
+  XCircle,
+  Loader2
 } from 'lucide-react';
 import { Submission, AttachmentFile } from '../../types';
+import { ArchiveService } from '../../services/archiveService';
 import { DESA_INFO } from '../../data/mockData';
 import { KabupatenBandungLogo } from '../KabupatenBandungLogo';
 
@@ -74,6 +76,34 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   }
 
   const currentDoc = attachments[currentIndex] || attachments[0];
+  const [resolvedUrl, setResolvedUrl] = useState<string>(currentDoc.url || '');
+  const [loadingUrl, setLoadingUrl] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (currentDoc.storagePath) {
+      setLoadingUrl(true);
+      ArchiveService.getAttachmentSignedUrl(currentDoc.storagePath)
+        .then((url) => {
+          if (isMounted) {
+            setResolvedUrl(url && url !== '#' ? url : (currentDoc.url || ''));
+          }
+        })
+        .catch(() => {
+          if (isMounted) setResolvedUrl(currentDoc.url || '');
+        })
+        .finally(() => {
+          if (isMounted) setLoadingUrl(false);
+        });
+    } else {
+      setResolvedUrl(currentDoc.url || '');
+      setLoadingUrl(false);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentDoc]);
 
   let details: any = {};
   try {
@@ -96,13 +126,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return (
       url.startsWith('data:image/') ||
       url.startsWith('blob:') ||
-      (url.startsWith('http') && (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp')))
+      (url.startsWith('http') && (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp') || url.includes('storage/v1/object/sign')))
     );
   };
 
   const isRealPdf = (url: string) => {
     if (!url || url === '#' || url === '') return false;
-    return url.startsWith('data:application/pdf') || (url.startsWith('blob:') && !isRealImage(url, ''));
+    return url.startsWith('data:application/pdf') || (url.startsWith('http') && url.includes('.pdf')) || (url.startsWith('blob:') && !isRealImage(url, ''));
   };
 
   const handlePrint = () => {
@@ -110,10 +140,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   };
 
   const handleDownload = () => {
-    if (currentDoc.url && currentDoc.url !== '#') {
+    const targetUrl = resolvedUrl || currentDoc.url;
+    if (targetUrl && targetUrl !== '#') {
       const a = document.createElement('a');
-      a.href = currentDoc.url;
+      a.href = targetUrl;
       a.download = currentDoc.name || 'dokumen.pdf';
+      a.target = '_blank';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -305,20 +337,26 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             }}
             className="flex items-center justify-center max-w-full"
           >
-            {/* 1. Real Image Upload */}
-            {isRealImage(currentDoc.url, currentDoc.name) ? (
+            {/* Loading signed URL */}
+            {loadingUrl ? (
+              <div className="flex flex-col items-center justify-center p-12 text-stone-400 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+                <p className="text-xs">Memuat dokumen dari penyimpanan aman...</p>
+              </div>
+            ) : isRealImage(resolvedUrl || currentDoc.url, currentDoc.name) ? (
+              /* 1. Real Image Upload */
               <div className="rounded-xl overflow-hidden shadow-2xl border border-stone-700 bg-black/40">
                 <img
-                  src={currentDoc.url}
+                  src={resolvedUrl || currentDoc.url}
                   alt={currentDoc.name}
                   className="max-h-[680px] max-w-full object-contain pointer-events-auto"
                 />
               </div>
-            ) : isRealPdf(currentDoc.url) ? (
+            ) : isRealPdf(resolvedUrl || currentDoc.url) ? (
               /* 2. Real PDF Preview */
               <div className="w-[750px] h-[650px] bg-white rounded-xl shadow-2xl overflow-hidden border border-stone-700">
                 <iframe
-                  src={currentDoc.url}
+                  src={resolvedUrl || currentDoc.url}
                   title={currentDoc.name}
                   className="w-full h-full border-0"
                 />

@@ -73,7 +73,7 @@ export const ProfilWarga: React.FC = () => {
       )}
 
       {/* Visual Digital Resident Card (Kartu Penduduk Bojongloa) */}
-      <div className="bg-gradient-to-br from-emerald-800 via-teal-800 to-stone-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-emerald-700/50">
+      <div className="bg-gradient-to-br from-emerald-800 via-teal-800 to-stone-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-emeralt-700/50">
         <div className="absolute right-0 top-0 translate-x-10 -translate-y-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-emerald-600/40 pb-5">
           <div className="flex items-center gap-3">
@@ -149,9 +149,9 @@ export const ProfilWarga: React.FC = () => {
                   <span>{profile?.phone || '0812-3456-7890'}</span>
                 </div>
               </div>
-            </div>
-            <div className="pt-3 border-t border-white/10 text-[10px] text-emerald-300">
-              Desa Bojongloa, Kec. Rancaekek, Kab. Bandung, Jawa Barat 40394
+              <div className="pt-3 border-t border-white/10 text-[10px] text-emerald-300">
+                Desa Bojongloa, Kec. Rancaekek, Kab. Bandung, Jawa Barat 40394
+              </div>
             </div>
           </div>
         </div>
@@ -208,7 +208,7 @@ export const ProfilWarga: React.FC = () => {
               />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="block font-semibold text-stone-700 mb-1">Dusun di Bojongloa</label>
               <select
                 value={formData.dusun}
@@ -273,4 +273,4 @@ export const ProfilWarga: React.FC = () => {
       )}
     </div>
   );
-};
+}

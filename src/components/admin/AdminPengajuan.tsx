@@ -75,8 +75,8 @@ export const AdminPengajuan: React.FC = () => {
   };
 
   // Open Approval Confirmation
-  const openApprovalModal = (sub: Submission) => {
-    const generatedNumber = ArchiveService.generateNomorRegistrasi(
+  const openApprovalModal = async (sub: Submission) => {
+    const generatedNumber = await ArchiveService.generateNomorRegistrasi(
       sub.type,
       submissions.filter((s) => s.status === 'disetujui').length + 1
     );

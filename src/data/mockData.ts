@@ -21,7 +21,7 @@ export const DESA_INFO = {
   nipSekdes: 'Sekretaris Desa Bojongloa',
   namaKasiPelayanan: 'ASEP KURNIAWAN, S.A.P.',
   nipKasi: 'Kasi Pelayanan Desa',
-  daftarDusun: ['Dusun Citaman', 'Dusun Cilogang', 'Dusun Babakan', 'Dusun Sukamaju'],
+  daftarDusun: ['Dusun I', 'Dusun II', 'Dusun III', 'Dusun IV'],
   daftarRW: ['RW 01', 'RW 02', 'RW 03', 'RW 04', 'RW 05', 'RW 06'],
   daftarRT: ['RT 01', 'RT 02', 'RT 03', 'RT 04', 'RT 05', 'RT 06']
 };

@@ -107,9 +107,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     })
     .slice(0, 8);
 
-  const handleOpenApprove = (sub: Submission) => {
+  const handleOpenApprove = async (sub: Submission) => {
     const seq = submissions.filter((s) => s.status === 'disetujui').length + 1;
-    const genNo = ArchiveService.generateSuratNumber(sub.type, seq);
+    const genNo = await ArchiveService.generateSuratNumber(sub.type, seq);
     setCustomLetterNumber(genNo);
     setApprovingItem(sub);
   };
