@@ -49,20 +49,17 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState<string>('');
+  const [loadingUrl, setLoadingUrl] = useState<boolean>(false);
 
-  useEffect(() => {
-    setCurrentIndex(initialIndex);
-    setZoomLevel(1);
-    setRotation(0);
-  }, [initialIndex, isOpen, submission]);
-
-  if (!isOpen || !submission) return null;
-
+  // Safe parse attachments (unconditionally calculated)
   let attachments: AttachmentFile[] = [];
-  try {
-    attachments = JSON.parse(submission.attachments || '[]');
-  } catch {
-    attachments = [];
+  if (submission?.attachments) {
+    try {
+      attachments = JSON.parse(submission.attachments || '[]');
+    } catch {
+      attachments = [];
+    }
   }
 
   if (attachments.length === 0) {
@@ -75,11 +72,25 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     ];
   }
 
-  const currentDoc = attachments[currentIndex] || attachments[0];
-  const [resolvedUrl, setResolvedUrl] = useState<string>(currentDoc.url || '');
-  const [loadingUrl, setLoadingUrl] = useState<boolean>(false);
+  const currentDoc = attachments[currentIndex] || attachments[0] || {
+    name: 'Dokumen_Persyaratan.pdf',
+    type: 'Berkas Persyaratan Kependudukan',
+    url: '#'
+  };
 
   useEffect(() => {
+    setCurrentIndex(initialIndex);
+    setZoomLevel(1);
+    setRotation(0);
+  }, [initialIndex, isOpen, submission]);
+
+  useEffect(() => {
+    if (!isOpen || !submission) {
+      setResolvedUrl('');
+      setLoadingUrl(false);
+      return;
+    }
+
     let isMounted = true;
     if (currentDoc.storagePath) {
       setLoadingUrl(true);
@@ -103,7 +114,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [currentDoc]);
+  }, [isOpen, submission, currentDoc]);
+
+  // ALL HOOKS ABOVE. Early return is safe here now.
+  if (!isOpen || !submission) return null;
 
   let details: any = {};
   try {
@@ -123,16 +137,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const isRealImage = (url: string, name: string) => {
     if (!url || url === '#' || url === '') return false;
     const lower = (name || '').toLowerCase();
-    return (
-      url.startsWith('data:image/') ||
-      url.startsWith('blob:') ||
-      (url.startsWith('http') && (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp') || url.includes('storage/v1/object/sign')))
-    );
+    const hasImageExt = lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp') || lower.endsWith('.gif');
+    if (hasImageExt) return true;
+    if (url.startsWith('data:image/')) return true;
+    if (url.startsWith('blob:') && !lower.endsWith('.pdf')) return true;
+    return false;
   };
 
-  const isRealPdf = (url: string) => {
+  const isRealPdf = (url: string, name: string) => {
     if (!url || url === '#' || url === '') return false;
-    return url.startsWith('data:application/pdf') || (url.startsWith('http') && url.includes('.pdf')) || (url.startsWith('blob:') && !isRealImage(url, ''));
+    const lower = (name || '').toLowerCase();
+    if (lower.endsWith('.pdf')) return true;
+    if (url.startsWith('data:application/pdf')) return true;
+    if (url.includes('.pdf?') || url.includes('.pdf')) return true;
+    return false;
   };
 
   const handlePrint = () => {
@@ -345,20 +363,43 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               </div>
             ) : isRealImage(resolvedUrl || currentDoc.url, currentDoc.name) ? (
               /* 1. Real Image Upload */
-              <div className="rounded-xl overflow-hidden shadow-2xl border border-stone-700 bg-black/40">
-                <img
-                  src={resolvedUrl || currentDoc.url}
-                  alt={currentDoc.name}
-                  className="max-h-[680px] max-w-full object-contain pointer-events-auto"
-                />
+              <div className="flex flex-col items-center gap-2">
+                <div className="rounded-xl overflow-hidden shadow-2xl border border-stone-700 bg-black/40">
+                  <img
+                    src={resolvedUrl || currentDoc.url}
+                    alt={currentDoc.name}
+                    className="max-h-[680px] max-w-full object-contain pointer-events-auto"
+                  />
+                </div>
+                <a
+                  href={resolvedUrl || currentDoc.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 text-xs transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Buka Gambar Ukuran Penuh di Tab Baru
+                </a>
               </div>
-            ) : isRealPdf(resolvedUrl || currentDoc.url) ? (
+            ) : isRealPdf(resolvedUrl || currentDoc.url, currentDoc.name) ? (
               /* 2. Real PDF Preview */
-              <div className="w-[750px] h-[650px] bg-white rounded-xl shadow-2xl overflow-hidden border border-stone-700">
+              <div className="w-[750px] h-[650px] bg-white rounded-xl shadow-2xl overflow-hidden border border-stone-700 flex flex-col">
+                <div className="bg-stone-100 px-3 py-1.5 border-b border-stone-200 flex items-center justify-between text-xs text-stone-700">
+                  <span className="font-semibold truncate max-w-xs">{currentDoc.name}</span>
+                  <a
+                    href={resolvedUrl || currentDoc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 font-bold"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Buka PDF di Tab Baru
+                  </a>
+                </div>
                 <iframe
                   src={resolvedUrl || currentDoc.url}
                   title={currentDoc.name}
-                  className="w-full h-full border-0"
+                  className="w-full flex-1 border-0"
                 />
               </div>
             ) : (
