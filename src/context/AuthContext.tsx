@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, supabaseServiceRole } from '../lib/supabase';
 import { UserProfile, UserRole } from '../types';
@@ -59,7 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
-  let isMounted = false;
+  const isMountedRef = useRef(true);
 
   /** Fetch a fresh profile from the `users` table by auth user ID. */
   const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
@@ -84,24 +84,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Initialize auth session and profile on app mount
   useEffect(() => {
-    isMounted = true;
+    let isMounted = true;
+
+    // Safety timeout: setelah 2.5 detik, pastikan loading selesai agar UI tidak pernah stuck loading
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setLoading(false);
+      }
+    }, 2500);
 
     const initialize = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!isMounted) return;
-      if (session?.user) {
-        setSupabaseUser(session.user);
-        const fetched = await fetchProfile(session.user.id);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!isMounted) return;
+
+        if (session?.user) {
+          setSupabaseUser(session.user);
+          const fetched = await fetchProfile(session.user.id);
+          if (isMounted) {
+            setProfile(fetched ?? null);
+            setRole(fetched?.role ?? null);
+          }
+        } else {
+          setSupabaseUser(null);
+          setProfile(null);
+          setRole(null);
+        }
+      } catch (err) {
+        console.warn('Inisialisasi sesi auth:', err);
+      } finally {
+        clearTimeout(safetyTimer);
         if (isMounted) {
-          setProfile(fetched ?? null);
-          setRole(fetched?.role ?? null);
           setLoading(false);
         }
-      } else {
-        setSupabaseUser(null);
-        setProfile(null);
-        setRole(null);
-        setLoading(false);
       }
     };
 
@@ -356,7 +372,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Ensure we have the latest profile (in case the trigger updated something)
     userProfile = await fetchProfile(uid) ?? userProfile;
-    if (isMounted) {
+    if (isMountedRef.current) {
       setProfile(userProfile);
       setRole(userProfile.role);
     }

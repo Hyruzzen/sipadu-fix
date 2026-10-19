@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy } from 'react';
+import React, { useState, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import { AppSidebar } from './components/layout/AppSidebar';
@@ -7,21 +7,22 @@ import { AppFooter } from './components/layout/AppFooter';
 import { LoadingFallback } from './components/common/LoadingFallback';
 import { AuthPrompt } from './components/common/AuthPrompt';
 
-// Code-split pages for sub-second initial load and clean modular maintenance
-const LandingPage = lazy(() => import('./pages/landing/LandingPage'));
-const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
-const RegisterPage = lazy(() => import('./pages/auth/RegisterPage'));
-const PengajuanPage = lazy(() => import('./pages/warga/PengajuanPage'));
-const RiwayatPengajuanPage = lazy(() => import('./pages/warga/RiwayatPengajuanPage'));
-const ProfilPage = lazy(() => import('./pages/warga/ProfilPage'));
-const PengaturanPage = lazy(() => import('./pages/warga/PengaturanPage'));
-const AdminDashboardPage = lazy(() => import('./pages/admin/AdminDashboardPage'));
-const PersetujuanPage = lazy(() => import('./pages/admin/PersetujuanPage'));
-const DataPendudukPage = lazy(() => import('./pages/admin/DataPendudukPage'));
-const LaporanPage = lazy(() => import('./pages/admin/LaporanPage'));
-const ManajemenAkunPage = lazy(() => import('./pages/admin/ManajemenAkunPage'));
-const KadesDashboardPage = lazy(() => import('./pages/kades/KadesDashboardPage'));
-const KadesLaporanPage = lazy(() => import('./pages/kades/KadesLaporanPage'));
+import {
+  LandingPage,
+  LoginPage,
+  RegisterPage,
+  PengajuanPage,
+  RiwayatPengajuanPage,
+  ProfilPage,
+  PengaturanPage,
+  AdminDashboardPage,
+  PersetujuanPage,
+  DataPendudukPage,
+  LaporanPage,
+  ManajemenAkunPage,
+  KadesDashboardPage,
+  KadesLaporanPage
+} from './pages';
 
 const MainContent: React.FC = () => {
   const { role, profile } = useAuth();

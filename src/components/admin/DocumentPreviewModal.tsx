@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   ZoomIn,
@@ -52,25 +52,38 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [resolvedUrl, setResolvedUrl] = useState<string>('');
   const [loadingUrl, setLoadingUrl] = useState<boolean>(false);
 
-  // Safe parse attachments (unconditionally calculated)
-  let attachments: AttachmentFile[] = [];
-  if (submission?.attachments) {
-    try {
-      attachments = JSON.parse(submission.attachments || '[]');
-    } catch {
-      attachments = [];
+  // Safe parse attachments (memoized to prevent infinite re-render cycles)
+  const attachments: AttachmentFile[] = useMemo(() => {
+    if (!submission?.attachments) {
+      return [
+        {
+          name: 'Dokumen_Persyaratan.pdf',
+          type: 'Berkas Persyaratan Kependudukan',
+          url: '#'
+        }
+      ];
     }
-  }
-
-  if (attachments.length === 0) {
-    attachments = [
+    if (Array.isArray(submission.attachments) && submission.attachments.length > 0) {
+      return submission.attachments;
+    }
+    try {
+      const parsed = typeof submission.attachments === 'string'
+        ? JSON.parse(submission.attachments)
+        : submission.attachments;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch {
+      // Fallback below
+    }
+    return [
       {
         name: 'Dokumen_Persyaratan.pdf',
         type: 'Berkas Persyaratan Kependudukan',
         url: '#'
       }
     ];
-  }
+  }, [submission?.id, submission?.attachments]);
 
   const currentDoc = attachments[currentIndex] || attachments[0] || {
     name: 'Dokumen_Persyaratan.pdf',
@@ -78,11 +91,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     url: '#'
   };
 
+  const currentStoragePath = currentDoc.storagePath || '';
+  const currentFallbackUrl = currentDoc.url || '';
+
   useEffect(() => {
     setCurrentIndex(initialIndex);
     setZoomLevel(1);
     setRotation(0);
-  }, [initialIndex, isOpen, submission]);
+  }, [initialIndex, isOpen, submission?.id]);
 
   useEffect(() => {
     if (!isOpen || !submission) {
@@ -92,38 +108,59 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     }
 
     let isMounted = true;
-    if (currentDoc.storagePath) {
+    if (currentStoragePath) {
       setLoadingUrl(true);
-      ArchiveService.getAttachmentSignedUrl(currentDoc.storagePath)
+
+      // Timeout pengaman (3.5 detik) agar status loading tidak pernah macet
+      const safetyTimeout = setTimeout(() => {
+        if (isMounted) {
+          setResolvedUrl((prev) => prev || currentFallbackUrl);
+          setLoadingUrl(false);
+        }
+      }, 3500);
+
+      ArchiveService.getAttachmentSignedUrl(currentStoragePath)
         .then((url) => {
           if (isMounted) {
-            setResolvedUrl(url && url !== '#' ? url : (currentDoc.url || ''));
+            setResolvedUrl(url && url !== '#' ? url : currentFallbackUrl);
           }
         })
         .catch(() => {
-          if (isMounted) setResolvedUrl(currentDoc.url || '');
+          if (isMounted) setResolvedUrl(currentFallbackUrl);
         })
         .finally(() => {
+          clearTimeout(safetyTimeout);
           if (isMounted) setLoadingUrl(false);
         });
+
+      return () => {
+        isMounted = false;
+        clearTimeout(safetyTimeout);
+      };
     } else {
-      setResolvedUrl(currentDoc.url || '');
+      setResolvedUrl(currentFallbackUrl);
       setLoadingUrl(false);
     }
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, submission, currentDoc]);
+  }, [isOpen, submission?.id, currentIndex, currentStoragePath, currentFallbackUrl]);
 
   // ALL HOOKS ABOVE. Early return is safe here now.
   if (!isOpen || !submission) return null;
 
   let details: any = {};
-  try {
-    details = JSON.parse(submission.details || '{}');
-  } catch {
-    details = {};
+  if (submission.details) {
+    if (typeof submission.details === 'object') {
+      details = submission.details;
+    } else {
+      try {
+        details = JSON.parse(submission.details);
+      } catch {
+        details = {};
+      }
+    }
   }
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.25, 2.5));
